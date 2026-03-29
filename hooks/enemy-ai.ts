@@ -14,6 +14,7 @@ import {
   posKey,
   cardinalNeighbors,
   getTemplateTier,
+  TENTACLE_CYCLE,
 } from "@/data/game-data";
 
 export function generateId() {
@@ -35,7 +36,7 @@ export function createEnemy(position: Position, templateId: string): Enemy {
   if (t.onDeathEffect) {
     onDeathEffects.push(t.onDeathEffect);
   }
-  return {
+  const enemy: Enemy = {
     id: generateId(),
     type: "enemy",
     position,
@@ -53,6 +54,11 @@ export function createEnemy(position: Position, templateId: string): Enemy {
     onDeathEffects,
     boss: t.boss,
   };
+  if (t.id === "octopus") {
+    enemy.spawnCycleIndex = 0;
+    enemy.bonusSpawns = 0;
+  }
+  return enemy;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,11 +76,14 @@ export function mergeInto(source: Enemy, target: Enemy): void {
   const targetTier = getTemplateTier(target.templateId);
 
   if (sourceTier > targetTier) {
+    const targetKeepRange = ENEMY_TEMPLATES[target.templateId]?.keepRange;
     target.templateId = source.templateId;
     target.word = source.word;
     target.emoji = source.emoji;
     target.speed = source.speed;
-    target.range = source.range;
+    if (!targetKeepRange) {
+      target.range = source.range;
+    }
     target.boss = source.boss;
   }
 
@@ -212,6 +221,10 @@ function runAbility(
       return execDevour(enemy, enemies);
     case "heal_lowest":
       return execHealLowest(enemy, enemies);
+    case "spawn_tentacle":
+      return execSpawnTentacle(enemy, enemies, player);
+    case "self_sacrifice":
+      return execSelfSacrifice(enemy, enemies);
     default:
       return { enemies, animations: [] };
   }
@@ -274,7 +287,7 @@ function execDevour(
 }
 
 /**
- * Heal Lowest: heals the enemy with the lowest current HP (other than self)
+ * Heal Lowest: heals the enemy with the lowest current HP (including self)
  * by this unit's attack value, capped at maxHealth.
  */
 function execHealLowest(
@@ -283,14 +296,86 @@ function execHealLowest(
 ): { enemies: Enemy[]; animations: AnimEvent[] } {
   const animations: AnimEvent[] = [];
 
-  const others = enemies.filter((e) => e.id !== healer.id && e.health < e.maxHealth);
-  if (others.length === 0) return { enemies, animations };
+  const candidates = enemies.filter((e) => e.health < e.maxHealth);
+  if (candidates.length === 0) return { enemies, animations };
 
-  others.sort((a, b) => a.health - b.health);
-  const target = others[0];
+  candidates.sort((a, b) => a.health - b.health);
+  const target = candidates[0];
 
   target.health = Math.min(target.maxHealth, target.health + healer.damage);
   animations.push({ type: "heal", unitId: target.id });
+
+  return { enemies, animations };
+}
+
+/**
+ * Spawn Tentacle: spawns 1 tentacle (+ bonus spawns) on the outer ring,
+ * cycling through front → side → back. Avoids the octopus's own tile and
+ * the player tile. Merges into existing enemies if the tile is occupied.
+ */
+function execSpawnTentacle(
+  octopus: Enemy,
+  enemies: Enemy[],
+  player: Player,
+): { enemies: Enemy[]; animations: AnimEvent[] } {
+  const animations: AnimEvent[] = [];
+  const octopusKey = posKey(octopus.position);
+  const playerKey = posKey(player.position);
+
+  const ring = getOuterRingPositions().filter(
+    (p) => posKey(p) !== octopusKey && posKey(p) !== playerKey,
+  );
+  if (ring.length === 0) return { enemies, animations };
+
+  const spawnCount = 1 + (octopus.bonusSpawns ?? 0);
+  octopus.bonusSpawns = 0;
+
+  let cycleIdx = octopus.spawnCycleIndex ?? 0;
+
+  for (let i = 0; i < spawnCount; i++) {
+    const templateId = TENTACLE_CYCLE[cycleIdx % TENTACLE_CYCLE.length];
+    cycleIdx++;
+
+    const occupied = new Set(enemies.map((e) => posKey(e.position)));
+    const emptyTiles = ring.filter((p) => !occupied.has(posKey(p)));
+
+    if (emptyTiles.length > 0) {
+      const pos = emptyTiles[Math.floor(Math.random() * emptyTiles.length)];
+      const tentacle = createEnemy(pos, templateId);
+      enemies = [...enemies, tentacle];
+      animations.push({ type: "spawn", unitId: tentacle.id });
+    } else {
+      const ringEnemies = enemies
+        .filter((e) => e.id !== octopus.id && ring.some((p) => posKey(p) === posKey(e.position)))
+        .sort((a, b) => getTemplateTier(a.templateId) - getTemplateTier(b.templateId));
+      if (ringEnemies.length > 0) {
+        const target = ringEnemies[0];
+        const tentacle = createEnemy(target.position, templateId);
+        mergeInto(tentacle, target);
+        animations.push({ type: "merge", unitId: target.id });
+      }
+    }
+  }
+
+  octopus.spawnCycleIndex = cycleIdx;
+  return { enemies, animations };
+}
+
+/**
+ * Self Sacrifice: the unit kills itself, triggering its on-death effects.
+ */
+function execSelfSacrifice(
+  unit: Enemy,
+  enemies: Enemy[],
+): { enemies: Enemy[]; animations: AnimEvent[] } {
+  const animations: AnimEvent[] = [];
+
+  const deathResult = triggerOnDeathEffects(unit, enemies);
+  enemies = deathResult.enemies;
+  animations.push(...deathResult.animations);
+
+  enemies = enemies.filter((e) => e.id !== unit.id);
+  animations.push({ type: "die", unitId: unit.id });
 
   return { enemies, animations };
 }
@@ -316,6 +401,15 @@ export function triggerOnDeathEffects(
             neighbor.health = Math.min(neighbor.maxHealth, neighbor.health + dying.damage);
             animations.push({ type: "heal", unitId: neighbor.id });
           }
+        }
+        break;
+      }
+      case "bonus_spawn_owner": {
+        const owner = enemies.find(
+          (e) => e.id !== dying.id && e.templateId === "octopus",
+        );
+        if (owner) {
+          owner.bonusSpawns = (owner.bonusSpawns ?? 0) + 1;
         }
         break;
       }

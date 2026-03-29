@@ -78,7 +78,17 @@ export const ENEMY_ABILITIES: Record<EnemyAbilityId, EnemyAbilityDef> = {
   heal_lowest: {
     id: "heal_lowest",
     name: "Heal Lowest",
-    description: "Heals the lowest-health ally by this unit's attack.",
+    description: "Heals the lowest-health ally (or itself) by this unit's attack.",
+  },
+  spawn_tentacle: {
+    id: "spawn_tentacle",
+    name: "Spawn Tentacle",
+    description: "Summons a tentacle on the outer ring, cycling front → side → back.",
+  },
+  self_sacrifice: {
+    id: "self_sacrifice",
+    name: "Self Sacrifice",
+    description: "Kills itself, triggering on-death effects.",
   },
 };
 
@@ -93,6 +103,11 @@ export const ON_DEATH_EFFECTS: Record<OnDeathEffectId, OnDeathEffectDef> = {
     id: "heal_adjacent",
     name: "Heal Adjacent",
     description: "On death, heals all adjacent allies by this unit's attack.",
+  },
+  bonus_spawn_owner: {
+    id: "bonus_spawn_owner",
+    name: "Bonus Spawn",
+    description: "On death, the octopus spawns 1 extra tentacle next turn.",
   },
 };
 
@@ -114,10 +129,16 @@ export const SPELL_TEMPLATES: Omit<Spell, "uid">[] = [
 const ENEMY_TEMPLATE_LIST: EnemyTemplate[] = [
   { id: "fish", word: "FISH", emoji: "🐟", health: 1, range: 1, damage: 1, speed: 1, points: 1 },
   { id: "crab", word: "CRAB", emoji: "🦀", health: 3, range: 1, damage: 5, speed: 1, points: 1 },
-  { id: "jellyfish", word: "JELLYFISH", emoji: "🪼", health: 15, range: 1, damage: 20, speed: 1, points: 1, ability: "heal_lowest", abilityCooldown: 0, onDeathEffect: "heal_adjacent" },
+  { id: "jellyfish", word: "JELLYFISH", emoji: "🪼", health: 10, range: 1, damage: 15, speed: 1, points: 1, ability: "heal_lowest", abilityCooldown: 0, onDeathEffect: "heal_adjacent" },
+  { id: "front_tentacle", word: "FRONT TENTACLE", emoji: "🦑", health: 15, range: 1, damage: 25, speed: 1, points: 1 },
+  { id: "side_tentacle", word: "SIDE TENTACLE", emoji: "🦑", health: 10, range: 2, damage: 15, speed: 1, points: 1, keepRange: true },
+  { id: "back_tentacle", word: "BACK TENTACLE", emoji: "🦑", health: 30, range: 1, damage: 0, speed: 0, points: 1, ability: "self_sacrifice", abilityCooldown: 0, onDeathEffect: "bonus_spawn_owner" },
   { id: "coral", word: "CORAL", emoji: "🪸", health: 10, range: 1, damage: 5, speed: 0, points: 1, ability: "spawn_fish", abilityCooldown: 1 },
   { id: "shark", word: "SHARK", emoji: "🦈", boss: true, health: 50, range: 1, damage: 5, speed: 1, points: 10, ability: "devour", abilityCooldown: 2 },
+  { id: "octopus", word: "OCTOPUS", emoji: "🐙", boss: true, health: 400, range: 1, damage: 0, speed: 0, points: 20, ability: "spawn_tentacle", abilityCooldown: 0 },
 ];
+
+export const TENTACLE_CYCLE = ["front_tentacle", "side_tentacle", "back_tentacle"] as const;
 
 export const ENEMY_TEMPLATES: Record<string, EnemyTemplate> = Object.fromEntries(
   ENEMY_TEMPLATE_LIST.map((t) => [t.id, t]),
@@ -137,9 +158,10 @@ export function getTotalTurns(level: LevelConfig): number {
   return keys.length > 0 ? Math.max(...keys) : 0;
 }
 
-export const LEVELS: LevelConfig[] = [
+/** Main-line levels (no parentId). Order here defines the main progression path. */
+export const MAIN_LEVELS: LevelConfig[] = [
   {
-    id: 1,
+    id: "1",
     name: "Tide Pools",
     description: "Welcome to the game",
     emoji: "💧",
@@ -154,7 +176,7 @@ export const LEVELS: LevelConfig[] = [
     },
   },
   {
-    id: 2,
+    id: "2",
     name: "Coral Reef",
     description: "Explore more enemies and stronger waves",
     emoji: "🪸",
@@ -174,11 +196,11 @@ export const LEVELS: LevelConfig[] = [
     },
   },
   {
-    id: 3,
+    id: "3",
     name: "The Ocean",
     description: "Fight your first boss",
     emoji: "🌊",
-    instruction: "There is a balance between clearing enemies and letting them merge. Defeat every enemy including the boss to win.",
+    instruction: "Boss enemies are strong with unique abilities. Feel free to come back after you are stronger to defeat them. Defeat every enemy including the boss to win.",
     maxTurns: 20,
     spawnSchedule: {
       1: [{ count: 3, enemyId: "coral" }],
@@ -194,7 +216,7 @@ export const LEVELS: LevelConfig[] = [
     },
   },
   {
-    id: 4,
+    id: "4",
     name: "Deep Sea",
     description: "You are on your own now!",
     emoji: "🪼",
@@ -203,14 +225,53 @@ export const LEVELS: LevelConfig[] = [
     spawnSchedule: {
       1: [{ count: 2, enemyId: "jellyfish" }, { count: 10, enemyId: "fish" }],
       2: [{ count: 2, enemyId: "jellyfish" }, { count: 10, enemyId: "fish" }],
-      3: [{ count: 2, enemyId: "jellyfish" }, { count: 5, enemyId: "crab" }, { count: 10, enemyId: "fish" }],
-      4: [{ count: 2, enemyId: "jellyfish" }, { count: 5, enemyId: "crab" }, { count: 10, enemyId: "fish" }],
-      5: [],
+      3: [{ count: 2, enemyId: "jellyfish" }, { count: 10, enemyId: "crab" }],
+      4: [],
+      5: [{ count: 1, enemyId: "octopus" }],
       6: [],
-      7: [],
+      7: [{ count: 2, enemyId: "jellyfish" }],
       8: [],
-      9: [],
+      9: [{ count: 2, enemyId: "jellyfish" }],
       10: [],
+      11: [{ count: 2, enemyId: "jellyfish" }],
+      12: [],
+      13: [{ count: 2, enemyId: "jellyfish" }],
+      14: [],
+      15: [{ count: 2, enemyId: "jellyfish" }],
+      16: [],
     },
   },
 ];
+
+/** Optional side-branch levels. Each has a parentId pointing to the main level it branches off. */
+export const BRANCH_LEVELS: LevelConfig[] = [
+  {
+    id: "1.1",
+    parentId: "1",
+    name: "Fish Pond",
+    description: "Optional — fight more fish",
+    emoji: "🐟",
+    instruction: "An optional challenge! Defeat them all!",
+    maxTurns: 10,
+    spawnSchedule: {
+      1: [{ count: 2, enemyId: "fish" }],
+      2: [{ count: 3, enemyId: "fish" }],
+      3: [{ count: 4, enemyId: "fish" }],
+      4: [{ count: 4, enemyId: "fish" }],
+      5: [{ count: 4, enemyId: "fish" }],
+    },
+  },
+];
+
+/** All levels combined. */
+export const LEVELS: LevelConfig[] = [...MAIN_LEVELS, ...BRANCH_LEVELS];
+
+/** Look up a level by its string id. */
+export function getLevelById(id: string): LevelConfig | undefined {
+  return LEVELS.find((l) => l.id === id);
+}
+
+/** Get branch levels that stem from a given parent level id. */
+export function getBranchLevels(parentId: string): LevelConfig[] {
+  return BRANCH_LEVELS.filter((l) => l.parentId === parentId);
+}

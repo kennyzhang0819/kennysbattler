@@ -242,11 +242,14 @@ export function useGame(options: UseGameOptions) {
 
       const hitMap = new Map(hits.map((h) => [h.enemy.id, h.damage]));
 
-      // Compute on-death heals: build a map of enemyId → total healing received
+      // Compute on-death effects: build maps for healing and bonusSpawns
       const healMap = new Map<string, number>();
+      const bonusSpawnMap = new Map<string, number>();
       for (const { enemy: e, damage } of hits) {
         if (e.health - damage <= 0 && e.onDeathEffects.length > 0) {
           const cloned = state.enemies.map((en) => ({ ...en, position: { ...en.position } }));
+          const beforeHealth = new Map(cloned.map((c) => [c.id, c.health]));
+          const beforeBonus = new Map(cloned.map((c) => [c.id, c.bonusSpawns ?? 0]));
           const result = triggerOnDeathEffects(
             cloned.find((c) => c.id === e.id)!,
             cloned,
@@ -256,9 +259,16 @@ export function useGame(options: UseGameOptions) {
               animations.push(anim);
               const healed = cloned.find((c) => c.id === anim.unitId);
               if (healed) {
+                const healAmount = healed.health - (beforeHealth.get(anim.unitId) ?? 0);
                 const prev = healMap.get(anim.unitId) ?? 0;
-                healMap.set(anim.unitId, prev + e.damage);
+                healMap.set(anim.unitId, prev + healAmount);
               }
+            }
+          }
+          for (const c of cloned) {
+            const delta = (c.bonusSpawns ?? 0) - (beforeBonus.get(c.id) ?? 0);
+            if (delta > 0) {
+              bonusSpawnMap.set(c.id, (bonusSpawnMap.get(c.id) ?? 0) + delta);
             }
           }
         }
@@ -272,10 +282,15 @@ export function useGame(options: UseGameOptions) {
         enemies: prev.enemies.map((e) => {
           const dmg = hitMap.get(e.id);
           const heal = healMap.get(e.id) ?? 0;
+          const extraSpawns = bonusSpawnMap.get(e.id) ?? 0;
           if (dmg !== undefined && killedIds.has(e.id)) return e;
           const newHp = (dmg !== undefined ? Math.max(0, e.health - dmg) : e.health) + heal;
-          if (heal > 0 || dmg !== undefined) {
-            return { ...e, health: Math.min(e.maxHealth, newHp) };
+          if (heal > 0 || dmg !== undefined || extraSpawns > 0) {
+            return {
+              ...e,
+              health: Math.min(e.maxHealth, newHp),
+              bonusSpawns: (e.bonusSpawns ?? 0) + extraSpawns,
+            };
           }
           return e;
         }),

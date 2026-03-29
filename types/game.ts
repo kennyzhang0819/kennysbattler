@@ -29,6 +29,8 @@ export interface Enemy extends Unit {
   abilities: EnemyAbilityInstance[];
   onDeathEffects: OnDeathEffectId[];
   boss?: boolean;
+  spawnCycleIndex?: number;
+  bonusSpawns?: number;
 }
 
 export interface Player extends Unit {
@@ -51,9 +53,9 @@ export interface Spell {
 // Enemy abilities
 // ---------------------------------------------------------------------------
 
-export type EnemyAbilityId = "spawn_fish" | "devour" | "heal_lowest";
+export type EnemyAbilityId = "spawn_fish" | "devour" | "heal_lowest" | "spawn_tentacle" | "self_sacrifice";
 
-export type OnDeathEffectId = "heal_adjacent";
+export type OnDeathEffectId = "heal_adjacent" | "bonus_spawn_owner";
 
 export interface EnemyAbilityDef {
   id: EnemyAbilityId;
@@ -131,6 +133,7 @@ export interface EnemyTemplate {
   abilityCooldown?: number;
   onDeathEffect?: OnDeathEffectId;
   boss?: boolean;
+  keepRange?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,11 +146,13 @@ export interface SpawnWave {
 }
 
 export interface LevelConfig {
-  id: number;
+  id: string;
   name: string;
   description: string;
   emoji: string;
   instruction: string;
   maxTurns: number;
   spawnSchedule: Record<number, SpawnWave[]>;
+  /** If set, this is an optional side-branch unlocked by completing the parent level. */
+  parentId?: string;
 }

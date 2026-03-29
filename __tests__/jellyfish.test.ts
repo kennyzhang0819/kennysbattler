@@ -78,7 +78,7 @@ describe("Jellyfish", () => {
       expect(unchanged!.health).toBe(T.crab.health);
     });
 
-    it("does not heal itself", () => {
+    it("heals itself when it is the only damaged enemy", () => {
       const player = makePlayer({ x: 0, y: 0 });
       const jelly = createEnemy({ x: 2, y: 2 }, "jellyfish");
       jelly.health = 1;
@@ -87,7 +87,38 @@ describe("Jellyfish", () => {
       const self = result.enemies.find((e) => e.id === jelly.id);
 
       expect(self).toBeDefined();
-      expect(self!.health).toBe(1);
+      expect(self!.health).toBe(Math.min(jelly.maxHealth, 1 + T.jellyfish.damage));
+    });
+
+    it("heals itself when it has the lowest HP among all enemies", () => {
+      const player = makePlayer({ x: 0, y: 0 });
+      const jelly = createEnemy({ x: 2, y: 2 }, "jellyfish");
+      jelly.health = 1;
+      const crab = createEnemy({ x: -2, y: -2 }, "crab");
+      crab.health = 2;
+
+      const result = processEnemyTurn(jelly, [jelly, crab], player);
+      const self = result.enemies.find((e) => e.id === jelly.id);
+      const untouchedCrab = result.enemies.find((e) => e.id === crab.id);
+
+      expect(self).toBeDefined();
+      expect(self!.health).toBe(Math.min(jelly.maxHealth, 1 + T.jellyfish.damage));
+      expect(untouchedCrab!.health).toBe(2);
+    });
+
+    it("heals an ally instead of itself when ally has lower HP", () => {
+      const player = makePlayer({ x: 0, y: 0 });
+      const jelly = createEnemy({ x: 2, y: 2 }, "jellyfish");
+      jelly.health = 5;
+      const crab = createEnemy({ x: -2, y: -2 }, "crab");
+      crab.health = 1;
+
+      const result = processEnemyTurn(jelly, [jelly, crab], player);
+      const self = result.enemies.find((e) => e.id === jelly.id);
+      const healedCrab = result.enemies.find((e) => e.id === crab.id);
+
+      expect(self!.health).toBe(5);
+      expect(healedCrab!.health).toBe(Math.min(crab.maxHealth, 1 + T.jellyfish.damage));
     });
 
     it("picks the lowest-health ally when multiple are damaged", () => {

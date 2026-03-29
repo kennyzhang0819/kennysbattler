@@ -10,12 +10,17 @@ import { SkillTree } from "./SkillTree";
 const STORAGE_KEY = "wordbattle-progress";
 
 interface SavedProgress {
-  completedLevels: number[];
+  completedLevels: string[];
   skillPoints: number;
   skillLevels: SkillLevels;
 }
 
 const EMPTY_PROGRESS: SavedProgress = { completedLevels: [], skillPoints: 0, skillLevels: {} };
+
+/** Migrate old numeric level IDs to strings on load. */
+function migrateCompletedLevels(raw: unknown[]): string[] {
+  return raw.map((v) => String(v));
+}
 
 function loadProgress(): SavedProgress {
   try {
@@ -23,7 +28,7 @@ function loadProgress(): SavedProgress {
     if (!raw) return EMPTY_PROGRESS;
     const parsed = JSON.parse(raw);
     return {
-      completedLevels: parsed.completedLevels ?? [],
+      completedLevels: migrateCompletedLevels(parsed.completedLevels ?? []),
       skillPoints: parsed.skillPoints ?? 0,
       skillLevels: parsed.skillLevels ?? {},
     };
@@ -46,7 +51,7 @@ type Screen =
   | { type: "game"; level: LevelConfig };
 
 interface AppState {
-  completedLevels: Set<number>;
+  completedLevels: Set<string>;
   skillPoints: number;
   skillLevels: SkillLevels;
 }
@@ -87,7 +92,7 @@ function updateStore(next: AppState) {
   for (const l of listeners) l();
 }
 
-const EMPTY_STATE: AppState = { completedLevels: new Set(), skillPoints: 0, skillLevels: {} };
+const EMPTY_STATE: AppState = { completedLevels: new Set<string>(), skillPoints: 0, skillLevels: {} };
 
 export function App() {
   const appState = useSyncExternalStore(subscribeToStore, getSnapshot, getServerSnapshotValue);
