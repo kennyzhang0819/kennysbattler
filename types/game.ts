@@ -24,8 +24,10 @@ export interface Enemy extends Unit {
   type: "enemy";
   damage: number;
   speed: number;
+  points: number;
   templateId: string;
   abilities: EnemyAbilityInstance[];
+  onDeathEffects: OnDeathEffectId[];
   boss?: boolean;
 }
 
@@ -49,7 +51,9 @@ export interface Spell {
 // Enemy abilities
 // ---------------------------------------------------------------------------
 
-export type EnemyAbilityId = "spawn_fish" | "devour";
+export type EnemyAbilityId = "spawn_fish" | "devour" | "heal_lowest";
+
+export type OnDeathEffectId = "heal_adjacent";
 
 export interface EnemyAbilityDef {
   id: EnemyAbilityId;
@@ -125,6 +129,7 @@ export interface EnemyTemplate {
   points: number;
   ability?: EnemyAbilityId;
   abilityCooldown?: number;
+  onDeathEffect?: OnDeathEffectId;
   boss?: boolean;
 }
 

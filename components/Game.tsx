@@ -38,6 +38,7 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
       die: "dying",
       merge: "merging",
       spawn: "spawning",
+      heal: "healing",
     };
 
     const newAnimations: Record<string, AnimationState> = {};
@@ -86,13 +87,19 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
   const [gridPreview, setGridPreview] = useState<Position | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [hoveredSpell, setHoveredSpell] = useState<Spell | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
 
-  const hoveredUnit =
-    state.enemies.find((e) => e.id === hoveredId) ||
-    (state.player.id === hoveredId ? state.player : null);
+  const findUnit = useCallback((id: string | null) => {
+    if (!id) return null;
+    return state.enemies.find((e) => e.id === id) || (state.player.id === id ? state.player : null) || null;
+  }, [state.enemies, state.player]);
+
+  const effectivePinnedId = pinnedId && aliveIds.has(pinnedId) ? pinnedId : null;
+  const displayId = hoveredId ?? effectivePinnedId;
+  const hoveredUnit = findUnit(displayId);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -166,6 +173,17 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
     []
   );
 
+  const handleUnitClick = useCallback(
+    (unit: Enemy | Player | null) => {
+      if (!unit) {
+        setPinnedId(null);
+        return;
+      }
+      setPinnedId((prev) => (prev === unit.id ? null : unit.id));
+    },
+    []
+  );
+
   const handleSpellHover = useCallback(
     (spell: Spell | null) => {
       setHoveredSpell(spell);
@@ -208,7 +226,7 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
     <div className="min-h-screen bg-zinc-900 flex flex-col items-center justify-center p-8 select-none">
       <div className="flex flex-col items-center gap-6">
         <div className="flex gap-6 items-start">
-          <div className="flex flex-col gap-4 w-36 select-none">
+          <div className="flex flex-col gap-4 w-40 select-none">
             <div className="bg-zinc-800 rounded-lg px-4 py-3 space-y-2">
               <button
                 onClick={onBackToMap}
@@ -267,10 +285,12 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
               gridPreview={isDragging ? gridPreview : null}
               isValidDrop={isValidDrop}
               hoveredId={hoveredId}
+              pinnedId={effectivePinnedId}
               intents={intents}
               unitAnimations={prunedAnimations}
               globalSpellDrag={false}
               onUnitHover={handleUnitHover}
+              onUnitClick={handleUnitClick}
               onTileMouseUp={handleTileMouseUp}
             />
           </div>

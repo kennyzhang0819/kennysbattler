@@ -45,7 +45,7 @@ export function SpellBar({
               onMouseLeave={() => onHover(null)}
               disabled={!isUsable}
               className={`
-                w-14 h-16 rounded-lg flex flex-col items-center justify-center gap-0.5
+                w-16 h-18 rounded-lg flex flex-col items-center justify-center gap-0.5
                 transition-all duration-100 border-2 relative
                 ${isUsable
                   ? "bg-zinc-700 border-zinc-500 hover:border-zinc-400 hover:bg-zinc-600 cursor-grab active:cursor-grabbing"

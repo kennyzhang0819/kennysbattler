@@ -10,11 +10,13 @@ interface UnitProps {
   unit: Enemy | Player;
   intent?: EnemyIntent;
   isHovered?: boolean;
-  animationState?: "idle" | "attacking" | "hurt" | "dying" | "merging" | "spawning";
+  isPinned?: boolean;
+  animationState?: "idle" | "attacking" | "hurt" | "dying" | "merging" | "spawning" | "healing";
   unitSize: number;
   unitOffset: number;
   onMouseDown?: (e: React.MouseEvent) => void;
   onMouseEnter?: () => void;
+  onClick?: () => void;
   onMouseUp?: () => void;
 }
 
@@ -22,11 +24,13 @@ export function Unit({
   unit,
   intent,
   isHovered,
+  isPinned,
   animationState = "idle",
   unitSize,
   unitOffset,
   onMouseDown,
   onMouseEnter,
+  onClick,
   onMouseUp,
 }: UnitProps) {
   const isPlayer = unit.type === "player";
@@ -44,6 +48,8 @@ export function Unit({
         return "animate-merge";
       case "spawning":
         return "animate-spawn";
+      case "healing":
+        return "animate-heal";
       default:
         return "";
     }
@@ -53,9 +59,10 @@ export function Unit({
     <div
       onMouseDown={onMouseDown}
       onMouseEnter={onMouseEnter}
+      onClick={onClick}
       onMouseUp={onMouseUp}
       className={`
-        absolute select-none
+        absolute select-none cursor-pointer
         transition-all duration-300 ease-out
         
         ${getAnimationClass()}
@@ -69,7 +76,7 @@ export function Unit({
     >
       <div className={`
         absolute inset-0 rounded-lg overflow-hidden
-        ${isHovered ? "ring-2 ring-yellow-400 ring-offset-1 ring-offset-transparent z-10" : ""}
+        ${isPinned ? "ring-2 ring-yellow-400 ring-offset-1 ring-offset-transparent z-10" : isHovered ? "ring-2 ring-yellow-400/40 ring-offset-1 ring-offset-transparent z-10" : ""}
         ${isPlayer ? "ring-1 ring-white/20" : ""}
       `}>
         <div className={`absolute inset-0 ${isPlayer ? "bg-zinc-600" : "bg-zinc-700"}`} />

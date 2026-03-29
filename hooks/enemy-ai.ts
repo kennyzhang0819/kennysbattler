@@ -4,6 +4,7 @@ import {
   Player,
   Position,
   EnemyIntent,
+  OnDeathEffectId,
 } from "@/types/game";
 import {
   ENEMY_TEMPLATES,
@@ -30,6 +31,10 @@ export function createEnemy(position: Position, templateId: string): Enemy {
   if (t.ability) {
     abilities.push({ id: t.ability, cooldown: t.abilityCooldown ?? 0, cooldownRemaining: 0 });
   }
+  const onDeathEffects: OnDeathEffectId[] = [];
+  if (t.onDeathEffect) {
+    onDeathEffects.push(t.onDeathEffect);
+  }
   return {
     id: generateId(),
     type: "enemy",
@@ -42,8 +47,10 @@ export function createEnemy(position: Position, templateId: string): Enemy {
     range: t.range,
     damage: t.damage,
     speed: t.speed,
+    points: t.points,
     templateId: t.id,
     abilities,
+    onDeathEffects,
     boss: t.boss,
   };
 }
@@ -74,10 +81,17 @@ export function mergeInto(source: Enemy, target: Enemy): void {
   target.health += source.health;
   target.maxHealth += source.maxHealth;
   target.damage += source.damage;
+  target.points += source.points;
 
   for (const srcAb of source.abilities) {
     if (!target.abilities.some((a) => a.id === srcAb.id)) {
       target.abilities.push({ ...srcAb });
+    }
+  }
+
+  for (const effect of source.onDeathEffects) {
+    if (!target.onDeathEffects.includes(effect)) {
+      target.onDeathEffects.push(effect);
     }
   }
 }
@@ -158,7 +172,7 @@ export function computeAllIntents(
 // ---------------------------------------------------------------------------
 
 export type AnimEvent = {
-  type: "attack" | "hurt" | "die" | "merge" | "spawn";
+  type: "attack" | "hurt" | "die" | "merge" | "spawn" | "heal";
   unitId: string;
 };
 
@@ -196,6 +210,8 @@ function runAbility(
       return execSpawnFish(enemy, enemies, player);
     case "devour":
       return execDevour(enemy, enemies);
+    case "heal_lowest":
+      return execHealLowest(enemy, enemies);
     default:
       return { enemies, animations: [] };
   }
@@ -252,6 +268,58 @@ function execDevour(
     const consumed = new Set(onAxis.map((e) => e.id));
     enemies = enemies.filter((e) => !consumed.has(e.id));
     animations.push({ type: "merge", unitId: shark.id });
+  }
+
+  return { enemies, animations };
+}
+
+/**
+ * Heal Lowest: heals the enemy with the lowest current HP (other than self)
+ * by this unit's attack value, capped at maxHealth.
+ */
+function execHealLowest(
+  healer: Enemy,
+  enemies: Enemy[],
+): { enemies: Enemy[]; animations: AnimEvent[] } {
+  const animations: AnimEvent[] = [];
+
+  const others = enemies.filter((e) => e.id !== healer.id && e.health < e.maxHealth);
+  if (others.length === 0) return { enemies, animations };
+
+  others.sort((a, b) => a.health - b.health);
+  const target = others[0];
+
+  target.health = Math.min(target.maxHealth, target.health + healer.damage);
+  animations.push({ type: "heal", unitId: target.id });
+
+  return { enemies, animations };
+}
+
+/**
+ * Fire on-death effects for a dying/merging enemy.
+ * Returns updated enemies array and any animations produced.
+ */
+export function triggerOnDeathEffects(
+  dying: Enemy,
+  enemies: Enemy[],
+): { enemies: Enemy[]; animations: AnimEvent[] } {
+  const animations: AnimEvent[] = [];
+
+  for (const effect of dying.onDeathEffects) {
+    switch (effect) {
+      case "heal_adjacent": {
+        for (const pos of cardinalNeighbors(dying.position)) {
+          const neighbor = enemies.find(
+            (e) => e.id !== dying.id && posKey(e.position) === posKey(pos),
+          );
+          if (neighbor) {
+            neighbor.health = Math.min(neighbor.maxHealth, neighbor.health + dying.damage);
+            animations.push({ type: "heal", unitId: neighbor.id });
+          }
+        }
+        break;
+      }
+    }
   }
 
   return { enemies, animations };

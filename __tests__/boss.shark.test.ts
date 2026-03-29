@@ -16,6 +16,7 @@ describe("Boss: Shark", () => {
   describe("identity & hierarchy", () => {
     it("shark is the highest tier", () => {
       expect(getTemplateTier("shark")).toBeGreaterThan(getTemplateTier("coral"));
+      expect(getTemplateTier("shark")).toBeGreaterThan(getTemplateTier("jellyfish"));
       expect(getTemplateTier("shark")).toBeGreaterThan(getTemplateTier("crab"));
       expect(getTemplateTier("shark")).toBeGreaterThan(getTemplateTier("fish"));
     });

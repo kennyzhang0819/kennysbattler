@@ -285,11 +285,12 @@ describe("Merging: HP, attack, and abilities transfer", () => {
 
 describe("Merging hierarchy", () => {
 
-  it("tier order is fish < crab < coral < shark", () => {
+  it("tier order is fish < crab < jellyfish < coral < shark", () => {
     expect(getTemplateTier("fish")).toBe(0);
     expect(getTemplateTier("crab")).toBe(1);
-    expect(getTemplateTier("coral")).toBe(2);
-    expect(getTemplateTier("shark")).toBe(3);
+    expect(getTemplateTier("jellyfish")).toBe(2);
+    expect(getTemplateTier("coral")).toBe(3);
+    expect(getTemplateTier("shark")).toBe(4);
   });
 
   it("lower tier merging into higher tier preserves higher tier identity", () => {

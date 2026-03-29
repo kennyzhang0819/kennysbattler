@@ -5,6 +5,7 @@ import {
   Spell,
   EnemyTemplate,
   LevelConfig,
+  OnDeathEffectId,
 } from "@/types/game";
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,25 @@ export const ENEMY_ABILITIES: Record<EnemyAbilityId, EnemyAbilityDef> = {
     name: "Devour",
     description: "Pulls and absorbs all enemies on the same row and column.",
   },
+  heal_lowest: {
+    id: "heal_lowest",
+    name: "Heal Lowest",
+    description: "Heals the lowest-health ally by this unit's attack.",
+  },
+};
+
+export interface OnDeathEffectDef {
+  id: OnDeathEffectId;
+  name: string;
+  description: string;
+}
+
+export const ON_DEATH_EFFECTS: Record<OnDeathEffectId, OnDeathEffectDef> = {
+  heal_adjacent: {
+    id: "heal_adjacent",
+    name: "Heal Adjacent",
+    description: "On death, heals all adjacent allies by this unit's attack.",
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -94,6 +114,7 @@ export const SPELL_TEMPLATES: Omit<Spell, "uid">[] = [
 const ENEMY_TEMPLATE_LIST: EnemyTemplate[] = [
   { id: "fish", word: "FISH", emoji: "🐟", health: 1, range: 1, damage: 1, speed: 1, points: 1 },
   { id: "crab", word: "CRAB", emoji: "🦀", health: 3, range: 1, damage: 5, speed: 1, points: 1 },
+  { id: "jellyfish", word: "JELLYFISH", emoji: "🪼", health: 15, range: 1, damage: 20, speed: 1, points: 1, ability: "heal_lowest", abilityCooldown: 0, onDeathEffect: "heal_adjacent" },
   { id: "coral", word: "CORAL", emoji: "🪸", health: 10, range: 1, damage: 5, speed: 0, points: 1, ability: "spawn_fish", abilityCooldown: 1 },
   { id: "shark", word: "SHARK", emoji: "🦈", boss: true, health: 50, range: 1, damage: 5, speed: 1, points: 10, ability: "devour", abilityCooldown: 2 },
 ];
@@ -165,29 +186,29 @@ export const LEVELS: LevelConfig[] = [
       3: [{ count: 4, enemyId: "crab" }],
       4: [{ count: 1, enemyId: "shark" }],
       5: [],
-      6: [{ count: 3, enemyId: "coral" }],
+      6: [{ count: 2, enemyId: "coral" }],
       7: [],
-      8: [{ count: 3, enemyId: "coral" }],
+      8: [{ count: 2, enemyId: "coral" }],
       9: [],
-      10: [],
+      10: [{ count: 2, enemyId: "coral" }],
     },
   },
   {
     id: 4,
-    name: "Under the Sea",
+    name: "Deep Sea",
     description: "You are on your own now!",
     emoji: "🪼",
     instruction: "Defeat every enemy to clear the level!",
-    maxTurns: 20,
+    maxTurns: 30,
     spawnSchedule: {
-      1: [{ count: 3, enemyId: "coral" }],
-      2: [{ count: 4, enemyId: "crab" }],
-      3: [{ count: 4, enemyId: "crab" }],
-      4: [{ count: 1, enemyId: "shark" }],
+      1: [{ count: 2, enemyId: "jellyfish" }, { count: 10, enemyId: "fish" }],
+      2: [{ count: 2, enemyId: "jellyfish" }, { count: 10, enemyId: "fish" }],
+      3: [{ count: 2, enemyId: "jellyfish" }, { count: 5, enemyId: "crab" }, { count: 10, enemyId: "fish" }],
+      4: [{ count: 2, enemyId: "jellyfish" }, { count: 5, enemyId: "crab" }, { count: 10, enemyId: "fish" }],
       5: [],
-      6: [{ count: 3, enemyId: "coral" }],
+      6: [],
       7: [],
-      8: [{ count: 3, enemyId: "coral" }],
+      8: [],
       9: [],
       10: [],
     },

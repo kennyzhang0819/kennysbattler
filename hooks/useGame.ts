@@ -12,7 +12,6 @@ import {
 import {
   REROLL_COST,
   SPELL_TEMPLATES,
-  ENEMY_TEMPLATES,
   posKey,
 } from "@/data/game-data";
 import {
@@ -28,6 +27,7 @@ import {
   processEnemyTurn,
   computeAllIntents,
   spawnWaveEnemies,
+  triggerOnDeathEffects,
   AnimEvent,
 } from "./enemy-ai";
 
@@ -234,14 +234,35 @@ export function useGame(options: UseGameOptions) {
           killedIds.add(e.id);
           animations.push({ type: "die", unitId: e.id });
           dyingIds.current.add(e.id);
-          const tmpl = ENEMY_TEMPLATES[e.templateId];
-          if (tmpl) earnedPoints += tmpl.points;
+          earnedPoints += e.points;
         } else {
           animations.push({ type: "hurt", unitId: e.id });
         }
       }
 
       const hitMap = new Map(hits.map((h) => [h.enemy.id, h.damage]));
+
+      // Compute on-death heals: build a map of enemyId → total healing received
+      const healMap = new Map<string, number>();
+      for (const { enemy: e, damage } of hits) {
+        if (e.health - damage <= 0 && e.onDeathEffects.length > 0) {
+          const cloned = state.enemies.map((en) => ({ ...en, position: { ...en.position } }));
+          const result = triggerOnDeathEffects(
+            cloned.find((c) => c.id === e.id)!,
+            cloned,
+          );
+          for (const anim of result.animations) {
+            if (anim.type === "heal") {
+              animations.push(anim);
+              const healed = cloned.find((c) => c.id === anim.unitId);
+              if (healed) {
+                const prev = healMap.get(anim.unitId) ?? 0;
+                healMap.set(anim.unitId, prev + e.damage);
+              }
+            }
+          }
+        }
+      }
 
       setState((prev) => ({
         ...prev,
@@ -250,8 +271,13 @@ export function useGame(options: UseGameOptions) {
         hand: replaceCard(prev.hand),
         enemies: prev.enemies.map((e) => {
           const dmg = hitMap.get(e.id);
-          if (dmg === undefined || killedIds.has(e.id)) return e;
-          return { ...e, health: Math.max(0, e.health - dmg) };
+          const heal = healMap.get(e.id) ?? 0;
+          if (dmg !== undefined && killedIds.has(e.id)) return e;
+          const newHp = (dmg !== undefined ? Math.max(0, e.health - dmg) : e.health) + heal;
+          if (heal > 0 || dmg !== undefined) {
+            return { ...e, health: Math.min(e.maxHealth, newHp) };
+          }
+          return e;
         }),
       }));
 
@@ -301,6 +327,7 @@ export function useGame(options: UseGameOptions) {
       ...e,
       position: { ...e.position },
       abilities: e.abilities.map((a) => ({ ...a })),
+      onDeathEffects: [...e.onDeathEffects],
     }));
     let player = { ...state.player, position: { ...state.player.position } };
     let gameOver = false;
@@ -338,7 +365,7 @@ export function useGame(options: UseGameOptions) {
 
       setState((prev) => ({
         ...prev,
-        enemies: enemies.map((e) => ({ ...e, position: { ...e.position }, abilities: e.abilities.map((a) => ({ ...a })) })),
+        enemies: enemies.map((e) => ({ ...e, position: { ...e.position }, abilities: e.abilities.map((a) => ({ ...a })), onDeathEffects: [...e.onDeathEffects] })),
         player: { ...player },
       }));
       if (allAnims.length > 0 && onAnimations) {

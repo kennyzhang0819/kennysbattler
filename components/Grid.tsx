@@ -10,7 +10,7 @@ import { GRID_HALF, GRID_SIZE, CELL_SIZE, isOuterRing } from "@/data/game-data";
 import { Unit } from "./Unit";
 import { MdBlock } from "react-icons/md";
 
-export type AnimationState = "idle" | "attacking" | "hurt" | "dying" | "merging" | "spawning";
+export type AnimationState = "idle" | "attacking" | "hurt" | "dying" | "merging" | "spawning" | "healing";
 
 interface GridProps {
   enemies: Enemy[];
@@ -18,10 +18,12 @@ interface GridProps {
   gridPreview: Position | null;
   isValidDrop: boolean;
   hoveredId: string | null;
+  pinnedId: string | null;
   intents: Record<string, EnemyIntent>;
   unitAnimations: Record<string, AnimationState>;
   globalSpellDrag: boolean;
   onUnitHover: (unit: Enemy | Player | null) => void;
+  onUnitClick: (unit: Enemy | Player | null) => void;
   onTileMouseUp: (pos: Position) => void;
 }
 
@@ -31,10 +33,12 @@ export function Grid({
   gridPreview,
   isValidDrop,
   hoveredId,
+  pinnedId,
   intents,
   unitAnimations,
   globalSpellDrag,
   onUnitHover,
+  onUnitClick,
   onTileMouseUp,
 }: GridProps) {
   const tiles: React.JSX.Element[] = [];
@@ -50,6 +54,7 @@ export function Grid({
           key={`${x},${y}`}
           onMouseUp={() => onTileMouseUp(pos)}
           onMouseEnter={() => onUnitHover(null)}
+          onClick={() => onUnitClick(null)}
           className={`
             relative select-none
             ${isSpawn ? "bg-zinc-800/50" : ""}
@@ -85,11 +90,13 @@ export function Grid({
         key={unit.id}
         unit={unit}
         intent={unit.type === "enemy" ? intents[unit.id] : undefined}
-        isHovered={unit.id === hoveredId}
+        isHovered={unit.id === hoveredId || unit.id === pinnedId}
+        isPinned={unit.id === pinnedId}
         animationState={unitAnimations[unit.id] || "idle"}
         unitSize={unitSize}
         unitOffset={unitOffset}
         onMouseEnter={() => onUnitHover(unit)}
+        onClick={() => onUnitClick(unit)}
         onMouseUp={() => onTileMouseUp(unit.position)}
       />
     );
