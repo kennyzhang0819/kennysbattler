@@ -3,21 +3,19 @@ export interface Position {
   y: number;
 }
 
+/** The four slide directions. Pressing one slides YOU (and every enemy). */
+export type Direction = "up" | "down" | "left" | "right";
+
 export interface Unit {
   id: string;
   position: Position;
   stackCount: number;
+  /** Enemies are slammed until this reaches 0. The player's value is unused. */
   health: number;
   maxHealth: number;
   word: string;
   emoji: string;
   range: number;
-}
-
-export interface EnemyAbilityInstance {
-  id: EnemyAbilityId;
-  cooldown: number;
-  cooldownRemaining: number;
 }
 
 export interface Enemy extends Unit {
@@ -26,34 +24,27 @@ export interface Enemy extends Unit {
   speed: number;
   points: number;
   templateId: string;
-  abilities: EnemyAbilityInstance[];
+  abilities: EnemyAbilityId[];
   onDeathEffects: OnDeathEffectId[];
-  boss?: boolean;
+  /** Ordered per-turn action script; the enemy cycles through it each turn. */
+  behavior: EnemyAction[];
+  /** Index of the next action to run in `behavior` (wraps around). */
+  behaviorIndex: number;
   spawnCycleIndex?: number;
   bonusSpawns?: number;
 }
 
 export interface Player extends Unit {
   type: "player";
-}
-
-export type SpellTarget = "self" | "enemy" | "tile";
-
-export interface Spell {
-  uid: string;
-  id: string;
-  name: string;
-  description: string;
-  emoji: string;
-  cost: number;
-  target: SpellTarget;
+  /** Damage dealt to an enemy when YOU slam into it. YOU take no damage — ever. */
+  attack: number;
 }
 
 // ---------------------------------------------------------------------------
 // Enemy abilities
 // ---------------------------------------------------------------------------
 
-export type EnemyAbilityId = "spawn_fish" | "devour" | "heal_lowest" | "spawn_tentacle" | "self_sacrifice";
+export type EnemyAbilityId = "spawn_fish" | "devour" | "heal_lowest" | "spawn_tentacle" | "self_sacrifice" | "regrow";
 
 export type OnDeathEffectId = "heal_adjacent" | "bonus_spawn_owner";
 
@@ -64,57 +55,65 @@ export interface EnemyAbilityDef {
 }
 
 // ---------------------------------------------------------------------------
-// Intents — what an enemy plans to do this turn
+// Scripted behavior — after the board slides, each enemy runs one action per
+// turn, cycling through its `behavior` list (Slay-the-Spire style telegraphs).
+// Movement is player-driven now, so there is no "move" action.
 // ---------------------------------------------------------------------------
 
-export type EnemyMoveIntent =
-  | { action: "move" }
-  | { action: "attack"; damage: number }
-  | { action: "idle" };
+export type EnemyActionKind = "attack" | "buff" | "special" | "idle";
 
-export interface EnemyIntent {
-  move: EnemyMoveIntent;
-  abilityReady: boolean;
+export interface EnemyAction {
+  kind: EnemyActionKind;
+  /** For "buff": amount added to this enemy's attack. */
+  amount?: number;
 }
 
 // ---------------------------------------------------------------------------
-// Game state
+// Game state — endless survival
 // ---------------------------------------------------------------------------
 
 export interface GameState {
+  /** Turns survived so far (also the score). */
   turn: number;
-  gold: number;
   killPoints: number;
-  rerollsUsed: number;
+  /** True while it is the player's turn (accepting input). */
   playerTurnActive: boolean;
   enemies: Enemy[];
   player: Player;
   gameOver: boolean;
-  won: boolean;
-  hand: Spell[];
+
+  // ---- Roguelike progression (per run) ----
+  /** Current character level (starts at 1). */
+  level: number;
+  /** XP banked toward the next level. */
+  xp: number;
+  /** XP required to advance from the current level to the next. */
+  xpToNext: number;
+  /** Stackable items collected this run: itemId -> stack count. */
+  inventory: Inventory;
+  /** Level-ups earned but not yet spent on an item choice. */
+  pendingChoices: number;
+  /** The 3 item ids currently offered (empty when not choosing). */
+  currentChoices: string[];
 }
 
 // ---------------------------------------------------------------------------
-// Skill tree
+// Roguelike items — stackable, Risk-of-Rain style
 // ---------------------------------------------------------------------------
 
-export type SkillLevels = Record<string, number>;
+export type ItemRarity = "common" | "uncommon" | "rare";
 
-export type SkillCategory = "spell" | "shop";
-
-export interface SkillSlot {
+export interface ItemDef {
   id: string;
-  spellId: string;
-  category: SkillCategory;
   name: string;
+  emoji: string;
+  rarity: ItemRarity;
+  /** One-liner describing what a single stack does. */
   description: string;
-  /** cost[i] = price to upgrade from level i to i+1. Length determines maxLevel. */
-  cost: number[];
-  requires?: string;
-  perLevelLabel: string;
-  /** Logical group for summing levels across tiers (e.g. "fireball_dmg" shared by tiers I/II/III). */
-  group?: string;
 }
+
+/** itemId -> how many copies you hold. */
+export type Inventory = Record<string, number>;
 
 // ---------------------------------------------------------------------------
 // Enemy templates
@@ -130,29 +129,9 @@ export interface EnemyTemplate {
   speed: number;
   points: number;
   ability?: EnemyAbilityId;
-  abilityCooldown?: number;
   onDeathEffect?: OnDeathEffectId;
-  boss?: boolean;
   keepRange?: boolean;
+  /** Ordered per-turn action script this enemy cycles through. */
+  behavior: EnemyAction[];
 }
 
-// ---------------------------------------------------------------------------
-// Level config
-// ---------------------------------------------------------------------------
-
-export interface SpawnWave {
-  count: number;
-  enemyId: string;
-}
-
-export interface LevelConfig {
-  id: string;
-  name: string;
-  description: string;
-  emoji: string;
-  instruction: string;
-  maxTurns: number;
-  spawnSchedule: Record<number, SpawnWave[]>;
-  /** If set, this is an optional side-branch unlocked by completing the parent level. */
-  parentId?: string;
-}

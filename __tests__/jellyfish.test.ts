@@ -4,6 +4,7 @@ import {
   mergeInto,
   processEnemyTurn,
   triggerOnDeathEffects,
+  resolveSlide,
 } from "@/hooks/enemy-ai";
 import { getTemplateTier } from "@/data/game-data";
 import { makePlayer, T } from "./helpers";
@@ -20,16 +21,15 @@ describe("Jellyfish", () => {
       expect(getTemplateTier("jellyfish")).toBeLessThan(getTemplateTier("coral"));
     });
 
-    it("jellyfish is not a boss", () => {
-      const jelly = createEnemy({ x: 0, y: 0 }, "jellyfish");
-      expect(jelly.boss).toBeUndefined();
-    });
-
-    it("jellyfish has heal_lowest ability with cooldown 0", () => {
+    it("jellyfish has the heal_lowest ability", () => {
       const jelly = createEnemy({ x: 0, y: 0 }, "jellyfish");
       expect(jelly.abilities).toHaveLength(1);
-      expect(jelly.abilities[0].id).toBe("heal_lowest");
-      expect(jelly.abilities[0].cooldown).toBe(0);
+      expect(jelly.abilities[0]).toBe("heal_lowest");
+    });
+
+    it("jellyfish runs its special first, then attacks", () => {
+      const jelly = createEnemy({ x: 0, y: 0 }, "jellyfish");
+      expect(jelly.behavior.map((a) => a.kind)).toEqual(["special", "attack"]);
     });
 
     it("jellyfish has heal_adjacent on-death effect", () => {
@@ -47,17 +47,15 @@ describe("Jellyfish", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Heal Lowest ability (per-turn)
+  // Heal Lowest ability (special action)
   // -------------------------------------------------------------------------
 
   describe("heal lowest ability", () => {
-    it("heals the lowest-health ally each turn", () => {
+    it("heals the lowest-health ally on its special turn", () => {
       const player = makePlayer({ x: 0, y: 0 });
       const jelly = createEnemy({ x: 2, y: 2 }, "jellyfish");
       const crab = createEnemy({ x: -2, y: -2 }, "crab");
       crab.health = 1;
-
-      jelly.abilities[0].cooldownRemaining = 0;
 
       const result = processEnemyTurn(jelly, [jelly, crab], player);
       const healed = result.enemies.find((e) => e.id === crab.id);
@@ -151,7 +149,7 @@ describe("Jellyfish", () => {
       expect(healed!.health).toBe(crab.maxHealth);
     });
 
-    it("fires every turn (cooldown 0)", () => {
+    it("heals on special turns and attacks on attack turns (alternating)", () => {
       const player = makePlayer({ x: 0, y: 0 });
       const jelly = createEnemy({ x: 2, y: 2 }, "jellyfish");
       const fish = createEnemy({ x: -2, y: -2 }, "fish");
@@ -160,23 +158,15 @@ describe("Jellyfish", () => {
 
       let enemies = [jelly, fish];
 
-      const r1 = processEnemyTurn(
-        enemies.find((e) => e.id === jelly.id)!,
-        enemies,
-        player,
-      );
+      // Turn 1: special → heals the fish.
+      const r1 = processEnemyTurn(enemies.find((e) => e.id === jelly.id)!, enemies, player);
       enemies = r1.enemies;
-      const afterFirst = enemies.find((e) => e.id === fish.id)!;
-      expect(afterFirst.health).toBe(1 + T.jellyfish.damage);
+      expect(enemies.find((e) => e.id === fish.id)!.health).toBe(1 + T.jellyfish.damage);
 
-      const r2 = processEnemyTurn(
-        enemies.find((e) => e.id === jelly.id)!,
-        enemies,
-        player,
-      );
+      // Turn 2: attack (out of range → approaches) → no additional heal.
+      const r2 = processEnemyTurn(enemies.find((e) => e.id === jelly.id)!, enemies, player);
       enemies = r2.enemies;
-      const afterSecond = enemies.find((e) => e.id === fish.id)!;
-      expect(afterSecond.health).toBe(1 + T.jellyfish.damage * 2);
+      expect(enemies.find((e) => e.id === fish.id)!.health).toBe(1 + T.jellyfish.damage);
     });
 
     it("produces a heal animation event", () => {
@@ -249,30 +239,29 @@ describe("Jellyfish", () => {
       expect(healAnims).toHaveLength(2);
     });
 
-    it("does NOT trigger on movement merge", () => {
-      const player = makePlayer({ x: 0, y: 0 });
-      const jelly = createEnemy({ x: 2, y: 0 }, "jellyfish");
-      const crab = createEnemy({ x: 1, y: 0 }, "crab");
-      const fish = createEnemy({ x: 2, y: 1 }, "fish");
+    it("does NOT trigger when a jellyfish is consumed by a like-merge", () => {
+      const player = makePlayer({ x: 2, y: 2 }); // far away — no slam
+      const jellyA = createEnemy({ x: -2, y: 0 }, "jellyfish");
+      const jellyB = createEnemy({ x: -1, y: 0 }, "jellyfish");
+      const fish = createEnemy({ x: -2, y: 1 }, "fish"); // adjacent to the merge tile
       fish.health = 1;
       fish.maxHealth = 100;
 
-      jelly.abilities[0].cooldownRemaining = 99;
+      // Sliding left stacks the two jellyfish into a bigger jellyfish; the consumed
+      // jelly is not "killed", so its on-death heal must NOT fire.
+      const result = resolveSlide("left", [jellyA, jellyB, fish], player);
 
-      const result = processEnemyTurn(jelly, [jelly, crab, fish], player);
+      expect(result.enemies.find((e) => e.id === jellyB.id)).toBeUndefined();
 
-      expect(result.enemies.find((e) => e.id === jelly.id)).toBeUndefined();
+      const merged = result.enemies.find((e) => e.id === jellyA.id)!;
+      expect(merged).toBeDefined();
+      expect(merged.templateId).toBe("jellyfish");
 
-      const updatedCrab = result.enemies.find((e) => e.id === crab.id);
-      expect(updatedCrab).toBeDefined();
-      expect(updatedCrab!.health).toBe(T.crab.health + T.jellyfish.health);
-
-      const healedFish = result.enemies.find((e) => e.id === fish.id);
-      expect(healedFish).toBeDefined();
-      expect(healedFish!.health).toBe(1);
+      const unhealedFish = result.enemies.find((e) => e.id === fish.id)!;
+      expect(unhealedFish.health).toBe(1);
     });
 
-    it("does NOT trigger when devoured by shark", () => {
+    it("does NOT trigger on-death heal when devoured by shark", () => {
       const player = makePlayer({ x: -2, y: -2 });
       const shark = createEnemy({ x: 0, y: 0 }, "shark");
       const jelly = createEnemy({ x: 0, y: 1 }, "jellyfish");
@@ -286,7 +275,8 @@ describe("Jellyfish", () => {
 
       const healedCrab = result.enemies.find((e) => e.id === crab.id);
       expect(healedCrab).toBeDefined();
-      // Shark gains heal_lowest from jellyfish merge, heals crab with combined damage
+      // Shark gains heal_lowest from the jellyfish merge and heals the crab
+      // with its combined damage during the same special action.
       const sharkCombinedDmg = T.shark.damage + T.jellyfish.damage;
       expect(healedCrab!.health).toBe(1 + sharkCombinedDmg);
     });
@@ -321,7 +311,7 @@ describe("Jellyfish", () => {
 
       mergeInto(j1, j2);
 
-      const healAbilities = j2.abilities.filter((a) => a.id === "heal_lowest");
+      const healAbilities = j2.abilities.filter((a) => a === "heal_lowest");
       expect(healAbilities).toHaveLength(1);
     });
 
@@ -342,7 +332,7 @@ describe("Jellyfish", () => {
       mergeInto(jelly, crab);
 
       expect(crab.templateId).toBe("jellyfish");
-      expect(crab.abilities.map((a) => a.id)).toContain("heal_lowest");
+      expect(crab.abilities).toContain("heal_lowest");
       expect(crab.onDeathEffects).toContain("heal_adjacent");
       expect(crab.health).toBe(T.jellyfish.health + T.crab.health);
       expect(crab.damage).toBe(T.jellyfish.damage + T.crab.damage);
@@ -356,8 +346,8 @@ describe("Jellyfish", () => {
 
       expect(coral.templateId).toBe("coral");
       expect(coral.speed).toBe(T.coral.speed);
-      expect(coral.abilities.map((a) => a.id)).toContain("heal_lowest");
-      expect(coral.abilities.map((a) => a.id)).toContain("spawn_fish");
+      expect(coral.abilities).toContain("heal_lowest");
+      expect(coral.abilities).toContain("spawn_fish");
       expect(coral.onDeathEffects).toContain("heal_adjacent");
     });
 

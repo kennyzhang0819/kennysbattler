@@ -4,6 +4,7 @@ import {
   mergeInto,
   spawnWaveEnemies,
   processEnemyTurn,
+  resolveSlide,
 } from "@/hooks/enemy-ai";
 import { Enemy } from "@/types/game";
 import { isOuterRing, posKey, getTemplateTier } from "@/data/game-data";
@@ -197,16 +198,15 @@ describe("Mobile vs immobile unit interactions", () => {
     }
   });
 
-  it("fish (speed=1) moves toward player each turn", () => {
-    const player = makePlayer({ x: 0, y: 0 });
+  it("enemies slide with the player toward the pressed wall", () => {
+    const player = makePlayer({ x: 0, y: 2 }); // different lane — no slam
     const fish = createEnemy({ x: 2, y: 0 }, "fish");
 
-    const result = processEnemyTurn(fish, [fish], player);
+    const result = resolveSlide("left", [fish], player);
 
-    const moved = result.enemies.find((e) => e.id === fish.id);
-    expect(moved).toBeDefined();
-    expect(moved!.position.x).toBe(1);
-    expect(moved!.position.y).toBe(0);
+    const moved = result.enemies.find((e) => e.id === fish.id)!;
+    expect(moved.position).toEqual({ x: -2, y: 0 });
+    expect(result.moved).toBe(true);
   });
 });
 
@@ -251,7 +251,7 @@ describe("Merging: HP, attack, and abilities transfer", () => {
     mergeInto(coral, fish);
 
     expect(fish.abilities).toHaveLength(1);
-    expect(fish.abilities[0].id).toBe("spawn_fish");
+    expect(fish.abilities[0]).toBe("spawn_fish");
   });
 
   it("duplicate abilities are NOT added twice", () => {
@@ -261,7 +261,7 @@ describe("Merging: HP, attack, and abilities transfer", () => {
     mergeInto(coral1, coral2);
 
     const spawnFishAbilities = coral2.abilities.filter(
-      (a) => a.id === "spawn_fish",
+      (a) => a === "spawn_fish",
     );
     expect(spawnFishAbilities).toHaveLength(1);
   });
@@ -308,10 +308,10 @@ describe("Merging hierarchy", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Speed, boss, range, cooldown do NOT transfer (non-shark)
+// 5. Speed and range do NOT transfer from lower tier (non-shark)
 // ---------------------------------------------------------------------------
 
-describe("Merging: speed, boss, range, cooldown do NOT transfer from lower tier", () => {
+describe("Merging: speed and range do NOT transfer from lower tier", () => {
 
   it("speed is NOT combined — higher tier speed is preserved", () => {
     const fish = createEnemy({ x: 0, y: 0 }, "fish");
@@ -323,15 +323,6 @@ describe("Merging: speed, boss, range, cooldown do NOT transfer from lower tier"
     expect(coral.templateId).toBe("coral");
   });
 
-  it("boss attribute is NOT transferred from lower tier", () => {
-    const fish = createEnemy({ x: 0, y: 0 }, "fish");
-    const crab = createEnemy({ x: 0, y: 0 }, "crab");
-
-    mergeInto(fish, crab);
-
-    expect(crab.boss).toBeUndefined();
-  });
-
   it("range is NOT combined — higher tier range is preserved", () => {
     const fish = createEnemy({ x: 0, y: 0 }, "fish");
     const crab = createEnemy({ x: 0, y: 0 }, "crab");
@@ -341,20 +332,14 @@ describe("Merging: speed, boss, range, cooldown do NOT transfer from lower tier"
     expect(crab.range).toBe(T.crab.range);
   });
 
-  it("ability cooldown state is preserved as-is (not combined)", () => {
+  it("abilities are deduped when merging same-type enemies", () => {
     const coral1 = createEnemy({ x: 0, y: 0 }, "coral");
     const coral2 = createEnemy({ x: 0, y: 0 }, "coral");
 
-    coral1.abilities[0].cooldownRemaining = 3;
-    coral2.abilities[0].cooldownRemaining = 1;
-
     mergeInto(coral1, coral2);
 
-    const spawnAbilities = coral2.abilities.filter(
-      (a) => a.id === "spawn_fish",
-    );
+    const spawnAbilities = coral2.abilities.filter((a) => a === "spawn_fish");
     expect(spawnAbilities).toHaveLength(1);
-    expect(spawnAbilities[0].cooldownRemaining).toBe(1);
   });
 
   it("speed=0 (immobile) is preserved when coral is higher tier target", () => {
@@ -385,7 +370,6 @@ describe("Random combo merging: expected outcomes", () => {
     expect(f2.damage).toBe(T.fish.damage * 2);
     expect(f2.speed).toBe(T.fish.speed);
     expect(f2.abilities).toHaveLength(0);
-    expect(f2.boss).toBeUndefined();
   });
 
   it("fish + crab = crab with combined stats", () => {
@@ -399,10 +383,10 @@ describe("Random combo merging: expected outcomes", () => {
     expect(crab.damage).toBe(T.fish.damage + T.crab.damage);
     expect(crab.speed).toBe(T.crab.speed);
     expect(crab.range).toBe(T.crab.range);
-    expect(crab.abilities).toHaveLength(0);
+    expect(crab.abilities).toEqual(["regrow"]); // crab keeps its own ability
   });
 
-  it("crab + coral = coral with combined stats, gains no new abilities", () => {
+  it("crab + coral = coral with combined stats, gains the crab's regrow", () => {
     const crab = createEnemy({ x: 0, y: 0 }, "crab");
     const coral = createEnemy({ x: 0, y: 0 }, "coral");
 
@@ -412,8 +396,8 @@ describe("Random combo merging: expected outcomes", () => {
     expect(coral.health).toBe(T.crab.health + T.coral.health);
     expect(coral.damage).toBe(T.crab.damage + T.coral.damage);
     expect(coral.speed).toBe(T.coral.speed);
-    expect(coral.abilities).toHaveLength(1);
-    expect(coral.abilities[0].id).toBe("spawn_fish");
+    expect(coral.abilities).toHaveLength(2);
+    expect(coral.abilities).toEqual(expect.arrayContaining(["spawn_fish", "regrow"]));
   });
 
   it("fish + coral = coral with combined stats and spawn_fish ability", () => {
@@ -427,7 +411,7 @@ describe("Random combo merging: expected outcomes", () => {
     expect(coral.damage).toBe(T.fish.damage + T.coral.damage);
     expect(coral.speed).toBe(T.coral.speed);
     expect(coral.abilities).toHaveLength(1);
-    expect(coral.abilities[0].id).toBe("spawn_fish");
+    expect(coral.abilities[0]).toBe("spawn_fish");
   });
 
   it("crab + fish = crab with combined stats (crab is higher tier source)", () => {
@@ -440,7 +424,7 @@ describe("Random combo merging: expected outcomes", () => {
     expect(fish.health).toBe(T.crab.health + T.fish.health);
     expect(fish.damage).toBe(T.crab.damage + T.fish.damage);
     expect(fish.speed).toBe(T.crab.speed);
-    expect(fish.abilities).toHaveLength(0);
+    expect(fish.abilities).toEqual(["regrow"]); // gains the crab's ability
   });
 
   it("5 fish merged together = 5x fish stats", () => {
@@ -476,23 +460,23 @@ describe("Random combo merging: expected outcomes", () => {
     expect(target.speed).toBe(T.coral.speed);
     expect(target.templateId).toBe("coral");
     expect(target.abilities).toHaveLength(1);
-    expect(target.abilities[0].id).toBe("spawn_fish");
+    expect(target.abilities[0]).toBe("spawn_fish");
   });
 
-  it("movement merge: fish walks into crab tile and merges", () => {
-    const player = makePlayer({ x: 0, y: 0 });
-    const fish = createEnemy({ x: 2, y: 0 }, "fish");
-    const crab = createEnemy({ x: 1, y: 0 }, "crab");
+  it("slide merge: two crabs stack into a bigger crab (no evolve)", () => {
+    const player = makePlayer({ x: 0, y: 2 }); // different lane — no slam
+    const crabA = createEnemy({ x: 2, y: 0 }, "crab"); // nearer the right wall
+    const crabB = createEnemy({ x: 1, y: 0 }, "crab");
 
-    const result = processEnemyTurn(fish, [fish, crab], player);
+    const result = resolveSlide("right", [crabA, crabB], player);
 
-    expect(result.enemies.find((e) => e.id === fish.id)).toBeUndefined();
+    expect(result.enemies.find((e) => e.id === crabB.id)).toBeUndefined();
 
-    const updatedCrab = result.enemies.find((e) => e.id === crab.id);
-    expect(updatedCrab).toBeDefined();
-    expect(updatedCrab!.health).toBe(T.fish.health + T.crab.health);
-    expect(updatedCrab!.damage).toBe(T.fish.damage + T.crab.damage);
-    expect(updatedCrab!.templateId).toBe("crab");
+    const merged = result.enemies.find((e) => e.id === crabA.id);
+    expect(merged).toBeDefined();
+    expect(merged!.templateId).toBe("crab"); // stays a crab
+    expect(merged!.stackCount).toBe(2);
+    expect(merged!.health).toBe(T.crab.health * 2); // pooled stats
   });
 
   it("overflow spawn merges into lowest-tier ring enemy", () => {

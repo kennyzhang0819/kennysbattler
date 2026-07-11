@@ -1,40 +1,38 @@
 "use client";
 
-import { Enemy, Player, EnemyIntent } from "@/types/game";
+import { Enemy, Player } from "@/types/game";
 import { gridToPixel } from "@/data/game-data";
-import { FaShoePrints } from "react-icons/fa6";
-import { GiBroadsword } from "react-icons/gi";
-import { MdHotelClass } from "react-icons/md";
+import { AnimationState } from "./Grid";
 
 interface UnitProps {
   unit: Enemy | Player;
-  intent?: EnemyIntent;
   isHovered?: boolean;
   isPinned?: boolean;
-  animationState?: "idle" | "attacking" | "hurt" | "dying" | "merging" | "spawning" | "healing";
+  animationState?: AnimationState;
   unitSize: number;
   unitOffset: number;
-  onMouseDown?: (e: React.MouseEvent) => void;
   onMouseEnter?: () => void;
   onClick?: () => void;
-  onMouseUp?: () => void;
 }
 
 export function Unit({
   unit,
-  intent,
   isHovered,
   isPinned,
   animationState = "idle",
   unitSize,
   unitOffset,
-  onMouseDown,
   onMouseEnter,
   onClick,
-  onMouseUp,
 }: UnitProps) {
   const isPlayer = unit.type === "player";
   const healthPercent = (unit.health / unit.maxHealth) * 100;
+
+  // A traveling slam bakes its momentum into the position move itself: an
+  // overshoot easing carries YOU past the resting tile and springs back — one
+  // fluid motion instead of a transform fighting the slide (which read as jank).
+  const isSlam = animationState.startsWith("slam-");
+  const moveEasing = isSlam ? "cubic-bezier(0.34, 1.7, 0.5, 1)" : undefined;
 
   const getAnimationClass = () => {
     switch (animationState) {
@@ -50,6 +48,16 @@ export function Unit({
         return "animate-spawn";
       case "healing":
         return "animate-heal";
+      case "buffing":
+        return "animate-buff";
+      case "lunge-up":
+        return "animate-lunge-up";
+      case "lunge-down":
+        return "animate-lunge-down";
+      case "lunge-left":
+        return "animate-lunge-left";
+      case "lunge-right":
+        return "animate-lunge-right";
       default:
         return "";
     }
@@ -57,10 +65,8 @@ export function Unit({
 
   return (
     <div
-      onMouseDown={onMouseDown}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
-      onMouseUp={onMouseUp}
       className={`
         absolute select-none cursor-pointer
         transition-all duration-300 ease-out
@@ -72,6 +78,7 @@ export function Unit({
         height: unitSize,
         left: gridToPixel(unit.position.x) + unitOffset,
         top: gridToPixel(unit.position.y) + unitOffset,
+        transitionTimingFunction: moveEasing,
       }}
     >
       <div className={`
@@ -79,12 +86,14 @@ export function Unit({
         ${isPinned ? "ring-2 ring-yellow-400 ring-offset-1 ring-offset-transparent z-10" : isHovered ? "ring-2 ring-yellow-400/40 ring-offset-1 ring-offset-transparent z-10" : ""}
         ${isPlayer ? "ring-1 ring-white/20" : ""}
       `}>
-        <div className={`absolute inset-0 ${isPlayer ? "bg-zinc-600" : "bg-zinc-700"}`} />
+        <div className={`absolute inset-0 ${isPlayer ? "bg-sky-700/60" : "bg-zinc-700"}`} />
 
-        <div
-          className={`absolute bottom-0 left-0 right-0 ${animationState !== "dying" ? "transition-all duration-300" : ""} ${isPlayer ? "bg-red-700/50" : "bg-zinc-500/40"}`}
-          style={{ height: `${healthPercent}%` }}
-        />
+        {!isPlayer && (
+          <div
+            className={`absolute bottom-0 left-0 right-0 ${animationState !== "dying" ? "transition-all duration-300" : ""} bg-zinc-500/40`}
+            style={{ height: `${healthPercent}%` }}
+          />
+        )}
 
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className="text-3xl leading-none">{unit.emoji}</span>
@@ -93,22 +102,6 @@ export function Unit({
           </span>
         </div>
       </div>
-
-      {intent && (intent.move.action !== "idle" || intent.abilityReady) && (
-        <div className="absolute top-1 right-1 z-20 flex items-center gap-1 text-[11px] font-bold leading-none">
-          {intent.abilityReady && (
-            <MdHotelClass className="w-3 h-3 text-purple-400" />
-          )}
-          {intent.move.action === "attack" ? (
-            <>
-              <GiBroadsword className="w-3 h-3 text-red-400" />
-              <span className="text-red-400">{intent.move.damage}</span>
-            </>
-          ) : intent.move.action === "move" ? (
-            <FaShoePrints className="w-3 h-3 text-sky-400" />
-          ) : null}
-        </div>
-      )}
     </div>
   );
 }

@@ -3,27 +3,29 @@ import {
   createEnemy,
   mergeInto,
   processEnemyTurn,
+  resolveSlide,
 } from "@/hooks/enemy-ai";
 import { getTemplateTier } from "@/data/game-data";
 import { makePlayer, T } from "./helpers";
 
-describe("Boss: Shark", () => {
+describe("Shark", () => {
 
   // -------------------------------------------------------------------------
   // Identity & hierarchy
   // -------------------------------------------------------------------------
 
   describe("identity & hierarchy", () => {
-    it("shark is the highest tier", () => {
+    it("shark outranks every non-octopus tier", () => {
       expect(getTemplateTier("shark")).toBeGreaterThan(getTemplateTier("coral"));
       expect(getTemplateTier("shark")).toBeGreaterThan(getTemplateTier("jellyfish"));
       expect(getTemplateTier("shark")).toBeGreaterThan(getTemplateTier("crab"));
       expect(getTemplateTier("shark")).toBeGreaterThan(getTemplateTier("fish"));
     });
 
-    it("shark is a boss unit", () => {
+    it("shark devours first, then attacks", () => {
       const shark = createEnemy({ x: 0, y: 0 }, "shark");
-      expect(shark.boss).toBe(true);
+      expect(shark.abilities).toEqual(["devour"]);
+      expect(shark.behavior.map((a) => a.kind)).toEqual(["special", "attack"]);
     });
 
     it("fish merging into shark keeps shark identity", () => {
@@ -34,7 +36,6 @@ describe("Boss: Shark", () => {
 
       expect(shark.templateId).toBe("shark");
       expect(shark.word).toBe(T.shark.word);
-      expect(shark.boss).toBe(true);
       expect(shark.health).toBe(T.fish.health + T.shark.health);
     });
 
@@ -47,7 +48,6 @@ describe("Boss: Shark", () => {
       expect(fish.templateId).toBe("shark");
       expect(fish.word).toBe(T.shark.word);
       expect(fish.emoji).toBe(T.shark.emoji);
-      expect(fish.boss).toBe(true);
     });
   });
 
@@ -77,9 +77,7 @@ describe("Boss: Shark", () => {
       expect(fish.health).toBe(T.shark.health + T.fish.health);
       expect(fish.damage).toBe(T.shark.damage + T.fish.damage);
       expect(fish.speed).toBe(T.shark.speed);
-      expect(fish.boss).toBe(true);
-      expect(fish.abilities).toHaveLength(1);
-      expect(fish.abilities[0].id).toBe("devour");
+      expect(fish.abilities).toEqual(["devour"]);
     });
 
     it("coral + shark = shark with combined stats and both abilities", () => {
@@ -93,11 +91,9 @@ describe("Boss: Shark", () => {
       expect(shark.maxHealth).toBe(T.coral.health + T.shark.health);
       expect(shark.damage).toBe(T.coral.damage + T.shark.damage);
       expect(shark.speed).toBe(T.shark.speed);
-      expect(shark.boss).toBe(true);
       expect(shark.range).toBe(T.shark.range);
 
-      const abilityIds = shark.abilities.map((a) => a.id).sort();
-      expect(abilityIds).toEqual(["devour", "spawn_fish"]);
+      expect([...shark.abilities].sort()).toEqual(["devour", "spawn_fish"]);
     });
 
     it("speed from lower-tier source does NOT override shark speed", () => {
@@ -118,23 +114,23 @@ describe("Boss: Shark", () => {
       expect(shark.range).toBe(T.shark.range);
     });
 
-    it("boss attribute IS preserved when merging into shark", () => {
+    it("shark's behavior script is preserved when a lower tier merges into it", () => {
       const fish = createEnemy({ x: 0, y: 0 }, "fish");
       const shark = createEnemy({ x: 0, y: 0 }, "shark");
 
       mergeInto(fish, shark);
 
-      expect(shark.boss).toBe(true);
+      expect(shark.behavior.map((a) => a.kind)).toEqual(["special", "attack"]);
     });
 
-    it("boss attribute IS transferred when shark merges into lower tier", () => {
+    it("shark's identity IS transferred when it merges into a lower tier", () => {
       const shark = createEnemy({ x: 0, y: 0 }, "shark");
       const fish = createEnemy({ x: 0, y: 0 }, "fish");
 
       mergeInto(shark, fish);
 
-      expect(fish.boss).toBe(true);
       expect(fish.templateId).toBe("shark");
+      expect(fish.behavior.map((a) => a.kind)).toEqual(["special", "attack"]);
     });
   });
 
@@ -150,29 +146,27 @@ describe("Boss: Shark", () => {
       mergeInto(coral, shark);
 
       expect(shark.templateId).toBe("shark");
-      const abilityIds = shark.abilities.map((a) => a.id);
-      expect(abilityIds).toContain("spawn_fish");
-      expect(abilityIds).toContain("devour");
+      expect(shark.abilities).toContain("spawn_fish");
+      expect(shark.abilities).toContain("devour");
     });
 
     it("merging coral and shark results in both abilities", () => {
       const coral = createEnemy({ x: 0, y: 0 }, "coral");
       const shark = createEnemy({ x: 0, y: 0 }, "shark");
 
-      expect(coral.abilities.map((a) => a.id)).toContain("spawn_fish");
-      expect(shark.abilities.map((a) => a.id)).toContain("devour");
+      expect(coral.abilities).toContain("spawn_fish");
+      expect(shark.abilities).toContain("devour");
 
       mergeInto(coral, shark);
 
-      const abilityIds = shark.abilities.map((a) => a.id);
-      expect(abilityIds).toContain("devour");
-      expect(abilityIds).toContain("spawn_fish");
+      expect(shark.abilities).toContain("devour");
+      expect(shark.abilities).toContain("spawn_fish");
       expect(shark.abilities).toHaveLength(2);
     });
   });
 
   // -------------------------------------------------------------------------
-  // Devour ability
+  // Devour ability (fires on the shark's special action)
   // -------------------------------------------------------------------------
 
   describe("devour ability", () => {
@@ -197,9 +191,8 @@ describe("Boss: Shark", () => {
       expect(enemies.find((e) => e.id === coral1.id)).toBeUndefined();
       expect(enemies.find((e) => e.id === coral2.id)).toBeUndefined();
 
-      const abilityIds = updatedShark!.abilities.map((a) => a.id);
-      expect(abilityIds).toContain("spawn_fish");
-      expect(abilityIds).toContain("devour");
+      expect(updatedShark!.abilities).toContain("spawn_fish");
+      expect(updatedShark!.abilities).toContain("devour");
     });
 
     it("devour merges stats precisely when eating fish (no ability side effects)", () => {
@@ -220,7 +213,6 @@ describe("Boss: Shark", () => {
       expect(updatedShark!.health).toBe(totalHp);
       expect(updatedShark!.damage).toBe(totalDmg);
       expect(updatedShark!.templateId).toBe("shark");
-      expect(updatedShark!.boss).toBe(true);
 
       expect(enemies.find((e) => e.id === fish1.id)).toBeUndefined();
       expect(enemies.find((e) => e.id === fish2.id)).toBeUndefined();
@@ -228,28 +220,36 @@ describe("Boss: Shark", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Movement merging
+  // Slide merging — a fish that slides into the shark is absorbed
   // -------------------------------------------------------------------------
 
-  describe("movement merging", () => {
-    it("shark walks into fish tile, becomes shark with extra HP", () => {
-      const player = makePlayer({ x: 0, y: 0 });
-      const shark = createEnemy({ x: 2, y: 0 }, "shark");
-      const fish = createEnemy({ x: 1, y: 0 }, "fish");
+  describe("slide merging (like-only)", () => {
+    it("two sharks stack into a bigger shark (no evolve)", () => {
+      const player = makePlayer({ x: 0, y: 2 }); // different lane — no slam
+      const sharkA = createEnemy({ x: -2, y: 0 }, "shark");
+      const sharkB = createEnemy({ x: -1, y: 0 }, "shark");
 
-      shark.abilities[0].cooldownRemaining = 5;
+      const result = resolveSlide("left", [sharkA, sharkB], player);
 
-      let enemies = [shark, fish];
-      const result = processEnemyTurn(shark, enemies, player);
-      enemies = result.enemies;
+      expect(result.enemies.find((e) => e.id === sharkB.id)).toBeUndefined();
 
-      expect(enemies.find((e) => e.id === shark.id)).toBeUndefined();
+      const merged = result.enemies.find((e) => e.id === sharkA.id)!;
+      expect(merged).toBeDefined();
+      expect(merged.templateId).toBe("shark"); // stays a shark
+      expect(merged.stackCount).toBe(2);
+      expect(merged.health).toBe(T.shark.health * 2);
+      expect(result.moved).toBe(true);
+    });
 
-      const updatedFish = enemies.find((e) => e.id === fish.id);
-      expect(updatedFish).toBeDefined();
-      expect(updatedFish!.templateId).toBe("shark");
-      expect(updatedFish!.health).toBe(T.shark.health + T.fish.health);
-      expect(updatedFish!.boss).toBe(true);
+    it("a fish does NOT merge into a shark (unlike types)", () => {
+      const player = makePlayer({ x: 0, y: 2 });
+      const shark = createEnemy({ x: -2, y: 0 }, "shark");
+      const fish = createEnemy({ x: -1, y: 0 }, "fish");
+
+      const result = resolveSlide("left", [shark, fish], player);
+
+      expect(result.enemies).toHaveLength(2);
+      expect(result.enemies.find((e) => e.id === shark.id)!.templateId).toBe("shark");
     });
   });
 
@@ -276,11 +276,9 @@ describe("Boss: Shark", () => {
       expect(shark.maxHealth).toBe(totalHp);
       expect(shark.damage).toBe(totalDmg);
       expect(shark.speed).toBe(T.shark.speed);
-      expect(shark.boss).toBe(true);
       expect(shark.range).toBe(T.shark.range);
 
-      const abilityIds = shark.abilities.map((a) => a.id).sort();
-      expect(abilityIds).toEqual(["devour", "spawn_fish"]);
+      expect([...shark.abilities].sort()).toEqual(["devour", "regrow", "spawn_fish"]);
     });
 
     it("reverse chain merge: shark → coral → crab → fish results in shark identity on fish", () => {
@@ -299,11 +297,9 @@ describe("Boss: Shark", () => {
       expect(fish.templateId).toBe("shark");
       expect(fish.health).toBe(totalHp);
       expect(fish.damage).toBe(totalDmg);
-      expect(fish.boss).toBe(true);
       expect(fish.speed).toBe(T.shark.speed);
 
-      const abilityIds = fish.abilities.map((a) => a.id).sort();
-      expect(abilityIds).toEqual(["devour", "spawn_fish"]);
+      expect([...fish.abilities].sort()).toEqual(["devour", "regrow", "spawn_fish"]);
     });
   });
 });

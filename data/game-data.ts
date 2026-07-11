@@ -1,10 +1,10 @@
 import {
   Position,
+  Direction,
   EnemyAbilityId,
   EnemyAbilityDef,
-  Spell,
+  EnemyAction,
   EnemyTemplate,
-  LevelConfig,
   OnDeathEffectId,
 } from "@/types/game";
 
@@ -15,10 +15,18 @@ import {
 export const GRID_HALF = 2;
 export const GRID_SIZE = GRID_HALF * 2 + 1;
 export const CELL_SIZE = 96;
-export const BASE_HAND_SIZE = 3;
-export const BASE_GOLD_PER_TURN = 1;
-export const BASE_PLAYER_HP = 10;
-export const REROLL_COST = 1;
+
+// Player base attack (grown by collecting items). YOU have no HP.
+export const BASE_PLAYER_ATTACK = 5;
+
+// ---------------------------------------------------------------------------
+// XP curve — kills grant XP; each level costs a little more than the last.
+// ---------------------------------------------------------------------------
+
+/** XP needed to advance from `level` to `level + 1`. */
+export function xpForLevel(level: number): number {
+  return 5 + (level - 1) * 4;
+}
 
 // ---------------------------------------------------------------------------
 // Grid helpers
@@ -60,6 +68,14 @@ export function cardinalNeighbors(p: Position): Position[] {
   ];
 }
 
+/** Unit step vector for each slide direction (grid y grows downward). */
+export const DIRECTION_VECTORS: Record<Direction, Position> = {
+  up: { x: 0, y: -1 },
+  down: { x: 0, y: 1 },
+  left: { x: -1, y: 0 },
+  right: { x: 1, y: 0 },
+};
+
 // ---------------------------------------------------------------------------
 // Enemy abilities
 // ---------------------------------------------------------------------------
@@ -90,7 +106,15 @@ export const ENEMY_ABILITIES: Record<EnemyAbilityId, EnemyAbilityDef> = {
     name: "Self Sacrifice",
     description: "Kills itself, triggering on-death effects.",
   },
+  regrow: {
+    id: "regrow",
+    name: "Regrow",
+    description: "Regrows 1 HP after every move.",
+  },
 };
+
+/** HP restored per turn by the passive Regrow ability. */
+export const REGROW_AMOUNT = 1;
 
 export interface OnDeathEffectDef {
   id: OnDeathEffectId;
@@ -112,30 +136,28 @@ export const ON_DEATH_EFFECTS: Record<OnDeathEffectId, OnDeathEffectDef> = {
 };
 
 // ---------------------------------------------------------------------------
-// Spell templates
-// ---------------------------------------------------------------------------
-
-export const SPELL_TEMPLATES: Omit<Spell, "uid">[] = [
-  { id: "fireball", name: "FIREBALL", description: "Deals 2 damage.", emoji: "🔥", cost: 1, target: "enemy" },
-  { id: "restore", name: "RESTORE", description: "+6 max HP.", emoji: "💚", cost: 1, target: "self" },
-  { id: "lightning", name: "LIGHTNING", description: "Deals 8 damage to all enemies on the target's row and column.", emoji: "⚡", cost: 1, target: "tile" },
-];
-
-// ---------------------------------------------------------------------------
 // Enemy templates
 // ---------------------------------------------------------------------------
 
+// Scripted-action shorthands. After the board slides, each enemy runs exactly
+// one action per turn, cycling through its `behavior` list (telegraphed).
+const ATTACK: EnemyAction = { kind: "attack" };
+const SPECIAL: EnemyAction = { kind: "special" };
+const IDLE: EnemyAction = { kind: "idle" };
+const BUFF = (amount: number): EnemyAction => ({ kind: "buff", amount });
+
 /** Ordered lowest → highest tier. Position in this array determines tier. */
 const ENEMY_TEMPLATE_LIST: EnemyTemplate[] = [
-  { id: "fish", word: "FISH", emoji: "🐟", health: 1, range: 1, damage: 1, speed: 1, points: 1 },
-  { id: "crab", word: "CRAB", emoji: "🦀", health: 3, range: 1, damage: 5, speed: 1, points: 1 },
-  { id: "jellyfish", word: "JELLYFISH", emoji: "🪼", health: 10, range: 1, damage: 15, speed: 1, points: 1, ability: "heal_lowest", abilityCooldown: 0, onDeathEffect: "heal_adjacent" },
-  { id: "front_tentacle", word: "FRONT TENTACLE", emoji: "🦑", health: 15, range: 1, damage: 25, speed: 1, points: 1 },
-  { id: "side_tentacle", word: "SIDE TENTACLE", emoji: "🦑", health: 10, range: 2, damage: 15, speed: 1, points: 1, keepRange: true },
-  { id: "back_tentacle", word: "BACK TENTACLE", emoji: "🦑", health: 30, range: 1, damage: 0, speed: 0, points: 1, ability: "self_sacrifice", abilityCooldown: 0, onDeathEffect: "bonus_spawn_owner" },
-  { id: "coral", word: "CORAL", emoji: "🪸", health: 10, range: 1, damage: 5, speed: 0, points: 1, ability: "spawn_fish", abilityCooldown: 1 },
-  { id: "shark", word: "SHARK", emoji: "🦈", boss: true, health: 50, range: 1, damage: 5, speed: 1, points: 10, ability: "devour", abilityCooldown: 2 },
-  { id: "octopus", word: "OCTOPUS", emoji: "🐙", boss: true, health: 400, range: 1, damage: 0, speed: 0, points: 20, ability: "spawn_tentacle", abilityCooldown: 0 },
+  { id: "fish", word: "FISH", emoji: "🐟", health: 1, range: 1, damage: 1, speed: 1, points: 1, behavior: [ATTACK] },
+  { id: "crab", word: "CRAB", emoji: "🦀", health: 6, range: 1, damage: 3, speed: 1, points: 1, ability: "regrow", behavior: [BUFF(2), ATTACK] },
+  { id: "jellyfish", word: "JELLYFISH", emoji: "🪼", health: 15, range: 1, damage: 6, speed: 1, points: 2, ability: "heal_lowest", onDeathEffect: "heal_adjacent", behavior: [SPECIAL, ATTACK] },
+  { id: "lobster", word: "LOBSTER", emoji: "🦞", health: 25, range: 2, damage: 8, speed: 1, points: 3, behavior: [IDLE, ATTACK] },
+  { id: "front_tentacle", word: "FRONT TENTACLE", emoji: "🦑", health: 15, range: 1, damage: 6, speed: 1, points: 2, behavior: [ATTACK] },
+  { id: "side_tentacle", word: "SIDE TENTACLE", emoji: "🦑", health: 12, range: 2, damage: 4, speed: 1, points: 2, keepRange: true, behavior: [ATTACK] },
+  { id: "back_tentacle", word: "BACK TENTACLE", emoji: "🦑", health: 20, range: 1, damage: 0, speed: 0, points: 2, ability: "self_sacrifice", onDeathEffect: "bonus_spawn_owner", behavior: [SPECIAL] },
+  { id: "coral", word: "CORAL", emoji: "🪸", health: 20, range: 1, damage: 3, speed: 0, points: 3, ability: "spawn_fish", behavior: [SPECIAL, IDLE] },
+  { id: "shark", word: "SHARK", emoji: "🦈", health: 45, range: 1, damage: 5, speed: 1, points: 10, ability: "devour", behavior: [SPECIAL, ATTACK] },
+  { id: "octopus", word: "OCTOPUS", emoji: "🐙", health: 70, range: 1, damage: 0, speed: 0, points: 20, ability: "spawn_tentacle", behavior: [SPECIAL, IDLE] },
 ];
 
 export const TENTACLE_CYCLE = ["front_tentacle", "side_tentacle", "back_tentacle"] as const;
@@ -149,129 +171,39 @@ export function getTemplateTier(templateId: string): number {
   return ENEMY_TEMPLATE_LIST.findIndex((t) => t.id === templateId);
 }
 
-// ---------------------------------------------------------------------------
-// Level config
-// ---------------------------------------------------------------------------
+/**
+ * 2048-style merge chain: two of the same type fuse into one of the next type.
+ * fish + fish → crab, crab + crab → jellyfish, and so on up to the octopus.
+ */
+export const MERGE_CHAIN = ["fish", "crab", "jellyfish", "lobster", "shark", "octopus"] as const;
 
-export function getTotalTurns(level: LevelConfig): number {
-  const keys = Object.keys(level.spawnSchedule).map(Number);
-  return keys.length > 0 ? Math.max(...keys) : 0;
+/** The template two `id`s merge into, or null if `id` is already at the top. */
+export function nextMergeTemplate(id: string): string | null {
+  const i = MERGE_CHAIN.indexOf(id as (typeof MERGE_CHAIN)[number]);
+  if (i === -1 || i === MERGE_CHAIN.length - 1) return null;
+  return MERGE_CHAIN[i + 1];
 }
 
-/** Main-line levels (no parentId). Order here defines the main progression path. */
-export const MAIN_LEVELS: LevelConfig[] = [
-  {
-    id: "1",
-    name: "Tide Pools",
-    description: "Welcome to the game",
-    emoji: "💧",
-    instruction: "Welcome to Kenny's Battler! Kill all enemies to win. Earn skill points from kills and spend them on the world map. Drag spells onto targets to cast.",
-    maxTurns: 15,
-    spawnSchedule: {
-      1: [{ count: 1, enemyId: "fish" }],
-      2: [{ count: 1, enemyId: "fish" }],
-      3: [{ count: 2, enemyId: "fish" }],
-      4: [{ count: 3, enemyId: "fish" }],
-      5: [{ count: 4, enemyId: "fish" }],
-    },
-  },
-  {
-    id: "2",
-    name: "Coral Reef",
-    description: "Explore more enemies and stronger waves",
-    emoji: "🪸",
-    instruction: "Some enemies can spawn others. Discover better spells to defeat them! Defeat every enemy to clear the level!",
-    maxTurns: 20,
-    spawnSchedule: {
-      1: [{ count: 2, enemyId: "fish" }],
-      2: [{ count: 2, enemyId: "crab" }],
-      3: [{ count: 2, enemyId: "fish" }, { count: 1, enemyId: "crab" }],
-      4: [{ count: 2, enemyId: "crab" }],
-      5: [{ count: 2, enemyId: "fish" }],
-      6: [{ count: 1, enemyId: "coral" }],
-      7: [],
-      8: [{ count: 2, enemyId: "crab" }],
-      9: [{ count: 2, enemyId: "fish" }, { count: 2, enemyId: "crab" }],
-      10: [{ count: 2, enemyId: "coral" }],
-    },
-  },
-  {
-    id: "3",
-    name: "The Ocean",
-    description: "Fight your first boss",
-    emoji: "🌊",
-    instruction: "Boss enemies are strong with unique abilities. Feel free to come back after you are stronger to defeat them. Defeat every enemy including the boss to win.",
-    maxTurns: 20,
-    spawnSchedule: {
-      1: [{ count: 3, enemyId: "coral" }],
-      2: [{ count: 4, enemyId: "crab" }],
-      3: [{ count: 4, enemyId: "crab" }],
-      4: [{ count: 1, enemyId: "shark" }],
-      5: [],
-      6: [{ count: 2, enemyId: "coral" }],
-      7: [],
-      8: [{ count: 2, enemyId: "coral" }],
-      9: [],
-      10: [{ count: 2, enemyId: "coral" }],
-    },
-  },
-  {
-    id: "4",
-    name: "Deep Sea",
-    description: "You are on your own now!",
-    emoji: "🪼",
-    instruction: "Defeat every enemy to clear the level!",
-    maxTurns: 30,
-    spawnSchedule: {
-      1: [{ count: 2, enemyId: "jellyfish" }, { count: 10, enemyId: "fish" }],
-      2: [{ count: 2, enemyId: "jellyfish" }, { count: 10, enemyId: "fish" }],
-      3: [{ count: 2, enemyId: "jellyfish" }, { count: 10, enemyId: "crab" }],
-      4: [],
-      5: [{ count: 1, enemyId: "octopus" }],
-      6: [],
-      7: [{ count: 2, enemyId: "jellyfish" }],
-      8: [],
-      9: [{ count: 2, enemyId: "jellyfish" }],
-      10: [],
-      11: [{ count: 2, enemyId: "jellyfish" }],
-      12: [],
-      13: [{ count: 2, enemyId: "jellyfish" }],
-      14: [],
-      15: [{ count: 2, enemyId: "jellyfish" }],
-      16: [],
-    },
-  },
+// ---------------------------------------------------------------------------
+// Endless spawning — one enemy joins the board every turn, escalating over time
+// ---------------------------------------------------------------------------
+
+/** The spawn pool in effect once the given turn is reached (later entries win). */
+export const SPAWN_SCHEDULE: { minTurn: number; pool: string[] }[] = [
+  { minTurn: 0, pool: ["fish"] },
+  { minTurn: 5, pool: ["fish", "crab"] },
+  { minTurn: 12, pool: ["crab", "crab", "jellyfish"] },
+  { minTurn: 22, pool: ["crab", "jellyfish", "lobster"] },
+  { minTurn: 34, pool: ["jellyfish", "lobster", "lobster", "shark"] },
 ];
 
-/** Optional side-branch levels. Each has a parentId pointing to the main level it branches off. */
-export const BRANCH_LEVELS: LevelConfig[] = [
-  {
-    id: "1.1",
-    parentId: "1",
-    name: "Fish Pond",
-    description: "Optional — fight more fish",
-    emoji: "🐟",
-    instruction: "An optional challenge! Defeat them all!",
-    maxTurns: 10,
-    spawnSchedule: {
-      1: [{ count: 2, enemyId: "fish" }],
-      2: [{ count: 3, enemyId: "fish" }],
-      3: [{ count: 4, enemyId: "fish" }],
-      4: [{ count: 4, enemyId: "fish" }],
-      5: [{ count: 4, enemyId: "fish" }],
-    },
-  },
-];
-
-/** All levels combined. */
-export const LEVELS: LevelConfig[] = [...MAIN_LEVELS, ...BRANCH_LEVELS];
-
-/** Look up a level by its string id. */
-export function getLevelById(id: string): LevelConfig | undefined {
-  return LEVELS.find((l) => l.id === id);
+export function spawnPoolForTurn(turn: number): string[] {
+  let pool = SPAWN_SCHEDULE[0].pool;
+  for (const s of SPAWN_SCHEDULE) if (turn >= s.minTurn) pool = s.pool;
+  return pool;
 }
 
-/** Get branch levels that stem from a given parent level id. */
-export function getBranchLevels(parentId: string): LevelConfig[] {
-  return BRANCH_LEVELS.filter((l) => l.parentId === parentId);
+/** How many enemies spawn per turn (ramps up so late game stays tense). */
+export function spawnsPerTurn(turn: number): number {
+  return turn >= 45 ? 2 : 1;
 }

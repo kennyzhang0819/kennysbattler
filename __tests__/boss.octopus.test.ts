@@ -5,10 +5,10 @@ import {
   processEnemyTurn,
   triggerOnDeathEffects,
 } from "@/hooks/enemy-ai";
-import { getTemplateTier, TENTACLE_CYCLE } from "@/data/game-data";
+import { getTemplateTier } from "@/data/game-data";
 import { makePlayer, T } from "./helpers";
 
-describe("Boss: Octopus", () => {
+describe("Octopus", () => {
 
   // -------------------------------------------------------------------------
   // Identity & hierarchy
@@ -23,11 +23,6 @@ describe("Boss: Octopus", () => {
       expect(getTemplateTier("octopus")).toBeGreaterThan(getTemplateTier("fish"));
     });
 
-    it("octopus is a boss", () => {
-      const octo = createEnemy({ x: 0, y: 0 }, "octopus");
-      expect(octo.boss).toBe(true);
-    });
-
     it("octopus has expected base stats", () => {
       const octo = createEnemy({ x: 0, y: 0 }, "octopus");
       expect(octo.health).toBe(T.octopus.health);
@@ -36,11 +31,10 @@ describe("Boss: Octopus", () => {
       expect(octo.speed).toBe(T.octopus.speed);
     });
 
-    it("octopus has spawn_tentacle ability with correct cooldown", () => {
+    it("octopus spawns a tentacle every other turn (special/idle script)", () => {
       const octo = createEnemy({ x: 0, y: 0 }, "octopus");
-      expect(octo.abilities).toHaveLength(1);
-      expect(octo.abilities[0].id).toBe("spawn_tentacle");
-      expect(octo.abilities[0].cooldown).toBe(T.octopus.abilityCooldown ?? 0);
+      expect(octo.abilities).toEqual(["spawn_tentacle"]);
+      expect(octo.behavior.map((a) => a.kind)).toEqual(["special", "idle"]);
     });
 
     it("octopus initializes spawnCycleIndex and bonusSpawns", () => {
@@ -85,8 +79,7 @@ describe("Boss: Octopus", () => {
       expect(t.health).toBe(T.back_tentacle.health);
       expect(t.damage).toBe(T.back_tentacle.damage);
       expect(t.speed).toBe(T.back_tentacle.speed);
-      expect(t.abilities).toHaveLength(1);
-      expect(t.abilities[0].id).toBe("self_sacrifice");
+      expect(t.abilities).toEqual(["self_sacrifice"]);
       expect(t.onDeathEffects).toContain("bonus_spawn_owner");
     });
   });
@@ -168,14 +161,10 @@ describe("Boss: Octopus", () => {
 
     it("spawns on outer ring, not on player tile", () => {
       const player = makePlayer({ x: 2, y: 0 });
-      const octo = createEnemy({ x: -2, y: -2 }, "octopus");
 
       for (let i = 0; i < 20; i++) {
-        const result = processEnemyTurn(
-          { ...octo, abilities: octo.abilities.map((a) => ({ ...a, cooldownRemaining: 0 })) },
-          [octo],
-          player,
-        );
+        const octo = createEnemy({ x: -2, y: -2 }, "octopus");
+        const result = processEnemyTurn(octo, [octo], player);
         const spawned = result.enemies.filter((e) => e.id !== octo.id);
         for (const s of spawned) {
           expect(s.position.x !== player.position.x || s.position.y !== player.position.y).toBe(true);
@@ -183,25 +172,23 @@ describe("Boss: Octopus", () => {
       }
     });
 
-    it("respects ability cooldown", () => {
+    it("fires every other turn (special, then idle)", () => {
       const player = makePlayer({ x: 0, y: 0 });
-      const octo = createEnemy({ x: 0, y: 0 }, "octopus");
-      const cd = T.octopus.abilityCooldown ?? 0;
+      let octo = createEnemy({ x: 0, y: 0 }, "octopus");
 
-      const r1 = processEnemyTurn(octo, [octo], player);
-      const spawned1 = r1.enemies.filter((e) => e.id !== octo.id);
-      expect(spawned1).toHaveLength(1);
+      // Turn 1 (special): spawns one tentacle.
+      let enemies = [octo];
+      const r1 = processEnemyTurn(octo, enemies, player);
+      enemies = r1.enemies;
+      expect(enemies.filter((e) => e.id !== octo.id)).toHaveLength(1);
 
-      const octoAfter1 = r1.enemies.find((e) => e.id === octo.id)!;
-      expect(octoAfter1.abilities[0].cooldownRemaining).toBe(cd);
-
-      if (cd > 0) {
-        const r2 = processEnemyTurn(octoAfter1, r1.enemies, player);
-        const newSpawns = r2.enemies.filter(
-          (e) => !r1.enemies.some((prev) => prev.id === e.id),
-        );
-        expect(newSpawns).toHaveLength(0);
-      }
+      // Turn 2 (idle): spawns nothing.
+      octo = enemies.find((e) => e.id === octo.id)!;
+      const r2 = processEnemyTurn(octo, enemies, player);
+      const newSpawns = r2.enemies.filter(
+        (e) => !enemies.some((prev) => prev.id === e.id),
+      );
+      expect(newSpawns).toHaveLength(0);
     });
 
     it("bonus spawns from back_tentacle death spawn extra tentacles", () => {
@@ -261,7 +248,6 @@ describe("Boss: Octopus", () => {
     it("triggers on-death effects when it dies", () => {
       const player = makePlayer({ x: 0, y: 0 });
       const octo = createEnemy({ x: 0, y: 0 }, "octopus");
-      octo.abilities[0].cooldownRemaining = 99;
       const back = createEnemy({ x: 2, y: 2 }, "back_tentacle");
 
       const result = processEnemyTurn(back, [back, octo], player);
@@ -349,16 +335,16 @@ describe("Boss: Octopus", () => {
       expect(result.player.health).toBe(100 - T.side_tentacle.damage);
     });
 
-    it("side tentacle moves when out of range", () => {
+    it("side tentacle stays put and deals no damage when out of range", () => {
       const player = makePlayer({ x: 0, y: 0 });
-      const side = createEnemy({ x: 2, y: 2 }, "side_tentacle");
+      const side = createEnemy({ x: 2, y: 2 }, "side_tentacle"); // dist 4 > range 2
 
       const result = processEnemyTurn(side, [side], player);
 
-      const moved = result.enemies.find((e) => e.id === side.id)!;
-      const distBefore = Math.abs(2) + Math.abs(2);
-      const distAfter = Math.abs(moved.position.x) + Math.abs(moved.position.y);
-      expect(distAfter).toBeLessThan(distBefore);
+      const after = result.enemies.find((e) => e.id === side.id)!;
+      expect(after.position).toEqual({ x: 2, y: 2 });
+      expect(result.animations.filter((a) => a.type === "attack")).toHaveLength(0);
+      expect(result.player.health).toBe(player.health);
     });
   });
 
@@ -374,19 +360,18 @@ describe("Boss: Octopus", () => {
       mergeInto(front, octo);
 
       expect(octo.templateId).toBe("octopus");
-      expect(octo.boss).toBe(true);
       expect(octo.health).toBe(T.octopus.health + T.front_tentacle.health);
       expect(octo.damage).toBe(T.octopus.damage + T.front_tentacle.damage);
     });
 
-    it("octopus merging into lower tier transfers boss status", () => {
+    it("octopus merging into lower tier transfers octopus identity", () => {
       const octo = createEnemy({ x: 0, y: 0 }, "octopus");
       const fish = createEnemy({ x: 0, y: 0 }, "fish");
 
       mergeInto(octo, fish);
 
       expect(fish.templateId).toBe("octopus");
-      expect(fish.boss).toBe(true);
+      expect(fish.behavior.map((a) => a.kind)).toEqual(["special", "idle"]);
       expect(fish.health).toBe(T.octopus.health + T.fish.health);
     });
 
@@ -410,7 +395,6 @@ describe("Boss: Octopus", () => {
       const player = makePlayer({ x: 0, y: 0 });
       const octo = createEnemy({ x: 0, y: 0 }, "octopus");
       octo.health = 100;
-      octo.abilities[0].cooldownRemaining = 99;
       const back = createEnemy({ x: 2, y: 2 }, "back_tentacle");
 
       const r1 = processEnemyTurn(back, [back, octo], player);
@@ -421,10 +405,65 @@ describe("Boss: Octopus", () => {
       expect(octoAfterSacrifice.health).toBe(100);
       expect(octoAfterSacrifice.bonusSpawns).toBe(1);
 
-      octoAfterSacrifice.abilities[0].cooldownRemaining = 0;
       const r2 = processEnemyTurn(octoAfterSacrifice, r1.enemies, player);
       const spawned = r2.enemies.filter(
         (e) => !r1.enemies.some((prev) => prev.id === e.id),
+      );
+
+      expect(spawned).toHaveLength(2);
+    });
+
+    it("2 back tentacles die → octopus spawns 3 next turn (1 base + 2 bonus)", () => {
+      const player = makePlayer({ x: 0, y: 0 });
+      const octo = createEnemy({ x: 0, y: 0 }, "octopus");
+      const back1 = createEnemy({ x: 2, y: 2 }, "back_tentacle");
+      const back2 = createEnemy({ x: -2, y: -2 }, "back_tentacle");
+
+      let enemies = [back1, back2, octo] as ReturnType<typeof createEnemy>[];
+
+      // back1 self-sacrifices
+      const r1 = processEnemyTurn(back1, enemies, player);
+      enemies = r1.enemies;
+
+      // back2 self-sacrifices
+      const current2 = enemies.find((e) => e.id === back2.id)!;
+      const r2 = processEnemyTurn(current2, enemies, player);
+      enemies = r2.enemies;
+
+      const octoNow = enemies.find((e) => e.id === octo.id)!;
+      expect(octoNow.bonusSpawns).toBe(2);
+
+      // octopus acts
+      const r3 = processEnemyTurn(octoNow, enemies, player);
+      const spawned = r3.enemies.filter(
+        (e) => !enemies.some((prev) => prev.id === e.id),
+      );
+
+      expect(spawned).toHaveLength(3);
+      const octoAfter = r3.enemies.find((e) => e.id === octo.id)!;
+      expect(octoAfter.bonusSpawns).toBe(0);
+    });
+
+    it("back tentacle killed BEFORE octopus acts in same turn → octopus gets +1", () => {
+      const player = makePlayer({ x: 0, y: 0 });
+      // Place octopus at bottom-right so it processes AFTER back tentacle (top-left)
+      const octo = createEnemy({ x: 2, y: 2 }, "octopus");
+      const back = createEnemy({ x: -2, y: -2 }, "back_tentacle");
+
+      let enemies = [back, octo] as ReturnType<typeof createEnemy>[];
+
+      // back tentacle acts first (top-left, earlier in processing order)
+      const r1 = processEnemyTurn(back, enemies, player);
+      enemies = r1.enemies;
+
+      expect(enemies.find((e) => e.id === back.id)).toBeUndefined();
+      const octoAfterBackDies = enemies.find((e) => e.id === octo.id)!;
+      expect(octoAfterBackDies.bonusSpawns).toBe(1);
+
+      // octopus acts next
+      const r2 = processEnemyTurn(octoAfterBackDies, enemies, player);
+      const spawned = r2.enemies.filter(
+        (e) => !enemies.some((prev) => prev.id === e.id),
       );
 
       expect(spawned).toHaveLength(2);

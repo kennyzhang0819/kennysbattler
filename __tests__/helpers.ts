@@ -4,7 +4,7 @@ import { isOuterRing, GRID_HALF, ENEMY_TEMPLATES } from "@/data/game-data";
 /** Shorthand lookup: `T.fish`, `T.shark`, etc. */
 export const T: Record<string, EnemyTemplate> = ENEMY_TEMPLATES;
 
-export function makePlayer(pos: Position = { x: 0, y: 0 }): Player {
+export function makePlayer(pos: Position = { x: 0, y: 0 }, attack = 5): Player {
   return {
     id: "player",
     type: "player",
@@ -15,6 +15,7 @@ export function makePlayer(pos: Position = { x: 0, y: 0 }): Player {
     word: "YOU",
     emoji: "❤️",
     range: 0,
+    attack,
   };
 }
 

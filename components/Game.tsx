@@ -3,33 +3,26 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useGame, AnimEvent } from "@/hooks/useGame";
 import { Grid, AnimationState } from "./Grid";
-import { SpellBar } from "./SpellBar";
 import { InfoBox } from "./InfoBox";
-import { GhostDrag } from "./GhostDrag";
-import { Bar } from "./Bar";
-import {
-  Position,
-  Spell,
-  Player,
-  Enemy,
-  LevelConfig,
-} from "@/types/game";
-import { inBounds, pixelToGrid, getTotalTurns } from "@/data/game-data";
+import { ItemChoice } from "./ItemChoice";
+import { Direction, Player, Enemy } from "@/types/game";
+import { ITEMS } from "@/data/items";
+import { FaArrowUp, FaArrowDown, FaArrowLeft, FaArrowRight } from "react-icons/fa6";
 
 interface GameProps {
-  levelConfig: LevelConfig;
-  unlockedSpellIds?: string[];
-  skillLevels?: Record<string, number>;
-  onWin: (earnedPoints: number) => void;
-  onLose: (earnedPoints: number) => void;
-  onBackToMap: () => void;
+  onRetry: () => void;
+  onExit: () => void;
 }
 
-export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose, onBackToMap }: GameProps) {
-  const [animSpeed, setAnimSpeed] = useState(250);
-  const [unitAnimations, setUnitAnimations] = useState<
-    Record<string, AnimationState>
-  >({});
+const KEY_TO_DIR: Record<string, Direction> = {
+  ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+  w: "up", s: "down", a: "left", d: "right",
+  W: "up", S: "down", A: "left", D: "right",
+};
+
+export function Game({ onRetry, onExit }: GameProps) {
+  const [animSpeed, setAnimSpeed] = useState(160);
+  const [unitAnimations, setUnitAnimations] = useState<Record<string, AnimationState>>({});
 
   const handleAnimations = useCallback((events: AnimEvent[]) => {
     const eventToState: Record<string, AnimationState> = {
@@ -39,12 +32,18 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
       merge: "merging",
       spawn: "spawning",
       heal: "healing",
+      buff: "buffing",
     };
 
     const newAnimations: Record<string, AnimationState> = {};
     const transientIds: string[] = [];
     for (const event of events) {
-      const mapped = eventToState[event.type] || "idle";
+      // YOUR slam carries a direction. A traveling slam gets momentum easing on
+      // its move ("slam-*"); an in-place slam gets a quick jab ("lunge-*").
+      const mapped: AnimationState =
+        event.type === "attack" && event.dir
+          ? ((event.traveled ? `slam-${event.dir}` : `lunge-${event.dir}`) as AnimationState)
+          : eventToState[event.type] || "idle";
       newAnimations[event.unitId] = mapped;
       if (mapped !== "dying") transientIds.push(event.unitId);
     }
@@ -55,9 +54,7 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
         setUnitAnimations((prev) => {
           const next = { ...prev };
           for (const id of transientIds) {
-            if (next[id] && next[id] !== "dying") {
-              delete next[id];
-            }
+            if (next[id] && next[id] !== "dying") delete next[id];
           }
           return next;
         });
@@ -65,8 +62,7 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
     }
   }, []);
 
-  const { state, intents, hasSpells, rerollUnlocked, rerollCost, canReroll, castSpell, reroll, endTurn, restart } =
-    useGame({ levelConfig, unlockedSpellIds, skillLevels, onAnimations: handleAnimations, animStepDelay: animSpeed });
+  const { state, move, chooseItem } = useGame({ onAnimations: handleAnimations, animStepDelay: animSpeed });
 
   const aliveIds = useMemo(() => {
     const ids = new Set(state.enemies.map((e) => e.id));
@@ -82,15 +78,8 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
     return next;
   }, [unitAnimations, aliveIds]);
 
-  const [spellDrag, setSpellDrag] = useState<Spell | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [gridPreview, setGridPreview] = useState<Position | null>(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
-  const [hoveredSpell, setHoveredSpell] = useState<Spell | null>(null);
-  const gridRef = useRef<HTMLDivElement>(null);
-  const dragStartPos = useRef<{ x: number; y: number } | null>(null);
 
   const findUnit = useCallback((id: string | null) => {
     if (!id) return null;
@@ -98,174 +87,118 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
   }, [state.enemies, state.player]);
 
   const effectivePinnedId = pinnedId && aliveIds.has(pinnedId) ? pinnedId : null;
-  const displayId = hoveredId ?? effectivePinnedId;
-  const hoveredUnit = findUnit(displayId);
+  const hoveredUnit = findUnit(hoveredId ?? effectivePinnedId);
+
+  const moveRef = useRef(move);
+  useEffect(() => {
+    moveRef.current = move;
+  }, [move]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && state.playerTurnActive && !state.gameOver) {
-        e.preventDefault();
-        setSpellDrag(null);
-        setGridPreview(null);
-        endTurn();
-      }
+      const dir = KEY_TO_DIR[e.key];
+      if (!dir) return;
+      e.preventDefault();
+      moveRef.current(dir);
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [state.playerTurnActive, state.gameOver, endTurn]);
+  }, []);
 
-  useEffect(() => {
-    if (!spellDrag) return;
+  const handleUnitHover = useCallback((unit: Enemy | Player | null) => {
+    setHoveredId(unit?.id ?? null);
+  }, []);
 
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging && dragStartPos.current) {
-        const dx = Math.abs(e.clientX - dragStartPos.current.x);
-        const dy = Math.abs(e.clientY - dragStartPos.current.y);
-        if (dx >= 5 || dy >= 5) setIsDragging(true);
-      }
+  const handleUnitClick = useCallback((unit: Enemy | Player | null) => {
+    if (!unit) {
+      setPinnedId(null);
+      return;
+    }
+    setPinnedId((prev) => (prev === unit.id ? null : unit.id));
+  }, []);
 
-      setMousePos({ x: e.clientX, y: e.clientY });
+  const choosing = state.currentChoices.length > 0;
+  const controlsDisabled = !state.playerTurnActive || state.gameOver || choosing;
 
-      if (!gridRef.current) return;
-      const rect = gridRef.current.getBoundingClientRect();
-      const x = pixelToGrid(e.clientX - rect.left);
-      const y = pixelToGrid(e.clientY - rect.top);
-
-      if (inBounds({ x, y })) {
-        setGridPreview({ x, y });
-      } else {
-        setGridPreview(null);
-      }
-    };
-
-    const handleMouseUp = () => {
-      setSpellDrag(null);
-      setIsDragging(false);
-      setGridPreview(null);
-      dragStartPos.current = null;
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [spellDrag, isDragging]);
-
-  const handleSpellDragStart = useCallback(
-    (spell: Spell, e: React.MouseEvent) => {
-      if (!state.playerTurnActive) return;
-      dragStartPos.current = { x: e.clientX, y: e.clientY };
-      setMousePos({ x: e.clientX, y: e.clientY });
-      setIsDragging(true);
-      setSpellDrag(spell);
-    },
-    [state.playerTurnActive]
+  const xpPct = Math.min(100, Math.round((state.xp / state.xpToNext) * 100));
+  const inventoryEntries = useMemo(
+    () => Object.entries(state.inventory).sort((a, b) => b[1] - a[1]),
+    [state.inventory],
   );
-
-  const handleUnitHover = useCallback(
-    (unit: Enemy | Player | null) => {
-      setHoveredId(unit?.id ?? null);
-    },
-    []
-  );
-
-  const handleUnitClick = useCallback(
-    (unit: Enemy | Player | null) => {
-      if (!unit) {
-        setPinnedId(null);
-        return;
-      }
-      setPinnedId((prev) => (prev === unit.id ? null : unit.id));
-    },
-    []
-  );
-
-  const handleSpellHover = useCallback(
-    (spell: Spell | null) => {
-      setHoveredSpell(spell);
-    },
-    []
-  );
-
-  const handleTileMouseUp = useCallback(
-    (pos: Position) => {
-      if (!spellDrag || !isDragging || !state.playerTurnActive) return;
-      castSpell(spellDrag, pos);
-      setSpellDrag(null);
-      setIsDragging(false);
-      setGridPreview(null);
-    },
-    [spellDrag, isDragging, state.playerTurnActive, castSpell]
-  );
-
-  const isValidDrop = useMemo(() => {
-    if (!gridPreview || !spellDrag) return false;
-    const playerPos = state.player.position;
-    const isPlayer =
-      gridPreview.x === playerPos.x && gridPreview.y === playerPos.y;
-    const isEnemy = state.enemies.some(
-      (e) =>
-        e.position.x === gridPreview.x &&
-        e.position.y === gridPreview.y &&
-        e.health > 0
-    );
-
-    if (spellDrag.target === "self") return isPlayer;
-    if (spellDrag.target === "enemy") return isEnemy;
-    if (spellDrag.target === "tile") return isEnemy;
-    return false;
-  }, [gridPreview, spellDrag, state.enemies, state.player.position]);
-
-  const canEndTurn = state.playerTurnActive && !state.gameOver;
 
   return (
     <div className="min-h-screen bg-zinc-900 flex flex-col items-center justify-center p-8 select-none">
       <div className="flex flex-col items-center gap-6">
         <div className="flex gap-6 items-start">
-          <div className="flex flex-col gap-4 w-40 select-none">
+          <div className="flex flex-col gap-4 w-44 select-none">
             <div className="bg-zinc-800 rounded-lg px-4 py-3 space-y-2">
-              <button
-                onClick={onBackToMap}
-                className="text-zinc-500 hover:text-zinc-300 text-[10px] font-bold tracking-wide transition-colors cursor-pointer"
-              >
-                ← MAP
-              </button>
               <div className="text-center flex flex-col items-center justify-center">
-                <span className="text-zinc-500 text-[10px] font-bold tracking-wide">
-                  {levelConfig.emoji} {levelConfig.name.toUpperCase()}
-                </span>
-                <span className="text-zinc-300 text-lg font-bold">
-                  {state.turn} / {getTotalTurns(levelConfig)}
-                </span>
-                <span className="text-zinc-600 text-[9px] mt-0.5">
-                  defeat all by turn {levelConfig.maxTurns}
-                </span>
+                <span className="text-zinc-500 text-[10px] font-bold tracking-wide">🌊 ENDLESS</span>
+                <span className="text-zinc-300 text-2xl font-bold leading-none mt-0.5">{state.turn}</span>
+                <span className="text-zinc-600 text-[9px] mt-0.5">turns survived</span>
               </div>
-              <Bar
-                value={state.player.health}
-                max={state.player.maxHealth}
-                color="bg-red-500"
-                label="❤️ HP"
-              />
+
+              {/* Level + XP */}
+              <div className="pt-1">
+                <div className="flex justify-between text-[11px] text-zinc-400 mb-1">
+                  <span>✨ Level</span>
+                  <span className="text-amber-400 font-bold">{state.level}</span>
+                </div>
+                <div className="w-full h-2 bg-zinc-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                    style={{ width: `${xpPct}%` }}
+                  />
+                </div>
+                <div className="text-right text-[9px] text-zinc-600 mt-0.5">{state.xp}/{state.xpToNext} XP</div>
+              </div>
+
+              <div className="flex justify-between text-[11px] text-zinc-400 pt-1">
+                <span>⚔️ Attack</span>
+                <span className="text-red-400 font-bold">{state.player.attack}</span>
+              </div>
+              <div className="flex justify-between text-[11px] text-zinc-400">
+                <span>💰 Score</span>
+                <span className="text-amber-400 font-bold">{state.killPoints}</span>
+              </div>
             </div>
+
+            {/* Inventory */}
             <div className="bg-zinc-800 rounded-lg px-3 py-3">
-              <p className="text-zinc-400 text-xs leading-snug">
-                {levelConfig.instruction}
-              </p>
+              <label className="text-zinc-500 text-[10px] font-bold tracking-wide block mb-2">🎒 ITEMS</label>
+              {inventoryEntries.length === 0 ? (
+                <p className="text-zinc-600 text-[11px] leading-snug">Level up to collect items.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {inventoryEntries.map(([id, count]) => {
+                    const item = ITEMS[id];
+                    if (!item) return null;
+                    return (
+                      <div
+                        key={id}
+                        title={`${item.name} ×${count} — ${item.description}`}
+                        className="relative flex items-center justify-center w-8 h-8 rounded-md bg-zinc-700 border border-zinc-600 text-lg"
+                      >
+                        {item.emoji}
+                        {count > 1 && (
+                          <span className="absolute -bottom-1 -right-1 text-[9px] font-bold text-white bg-zinc-900 rounded-full px-1 leading-tight border border-zinc-600">
+                            {count}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+
             <div className="bg-zinc-800 rounded-lg px-3 py-3 space-y-1.5">
-              <label className="text-zinc-500 text-[10px] font-bold tracking-wide block">
-                ⚡ ANIM SPEED
-              </label>
+              <label className="text-zinc-500 text-[10px] font-bold tracking-wide block">⚡ ANIM SPEED</label>
               <input
                 type="range"
-                min={50}
-                max={1000}
-                step={25}
+                min={40}
+                max={500}
+                step={10}
                 value={animSpeed}
                 onChange={(e) => setAnimSpeed(Number(e.target.value))}
                 className="w-full h-1.5 accent-amber-500 cursor-pointer"
@@ -278,126 +211,85 @@ export function Game({ levelConfig, unlockedSpellIds, skillLevels, onWin, onLose
             </div>
           </div>
 
-          <div ref={gridRef}>
-            <Grid
-              enemies={state.enemies}
-              player={state.player}
-              gridPreview={isDragging ? gridPreview : null}
-              isValidDrop={isValidDrop}
-              hoveredId={hoveredId}
-              pinnedId={effectivePinnedId}
-              intents={intents}
-              unitAnimations={prunedAnimations}
-              globalSpellDrag={false}
-              onUnitHover={handleUnitHover}
-              onUnitClick={handleUnitClick}
-              onTileMouseUp={handleTileMouseUp}
-            />
-          </div>
-
-          <InfoBox
-            unit={hoveredUnit}
-            unitIntent={hoveredUnit && hoveredUnit.type === "enemy" ? intents[hoveredUnit.id] : undefined}
-            hoveredSpell={hoveredSpell}
+          <Grid
+            enemies={state.enemies}
+            player={state.player}
+            hoveredId={hoveredId}
+            pinnedId={effectivePinnedId}
+            unitAnimations={prunedAnimations}
+            onUnitHover={handleUnitHover}
+            onUnitClick={handleUnitClick}
           />
+
+          <InfoBox unit={hoveredUnit} />
         </div>
 
-        <div className="flex items-center gap-4">
-          {hasSpells && (
-            <div className="w-16 h-16 rounded-full bg-zinc-800 border-2 border-yellow-500/60 flex flex-col items-center justify-center shrink-0">
-              <span className="text-lg leading-none">💰</span>
-              <span className="text-yellow-400 text-sm font-bold">{state.gold}</span>
-            </div>
-          )}
-
-          {hasSpells && (
-            <SpellBar
-              hand={state.hand}
-              gold={state.gold}
-              showReroll={rerollUnlocked}
-              canReroll={canReroll}
-              rerollCost={rerollCost}
-              onDragStart={handleSpellDragStart}
-              onHover={handleSpellHover}
-              onReroll={reroll}
-              disabled={!state.playerTurnActive || state.gameOver}
-            />
-          )}
-
-          <button
-            onClick={() => {
-              if (canEndTurn) {
-                setSpellDrag(null);
-                setGridPreview(null);
-                endTurn();
-              }
-            }}
-            disabled={!canEndTurn}
-            className={`
-              w-16 h-16 rounded-full font-bold text-xs transition-all duration-150 shrink-0
-              flex flex-col items-center justify-center gap-0.5
-              ${canEndTurn
-                ? "bg-zinc-700 hover:bg-zinc-600 active:bg-zinc-500 text-white cursor-pointer border-2 border-zinc-500"
-                : "bg-zinc-800 text-zinc-600 cursor-not-allowed border-2 border-zinc-700"
-              }
-            `}
-          >
-            <span className="leading-none">END</span>
-            <kbd className="px-1 py-0.5 rounded bg-zinc-600 text-zinc-300 text-[9px] font-mono leading-none">
-              Space
-            </kbd>
-          </button>
-        </div>
+        <DirectionPad onMove={(d) => moveRef.current(d)} disabled={controlsDisabled} />
       </div>
 
-      {isDragging && spellDrag && (
-        <GhostDrag emoji={spellDrag.emoji} mousePos={mousePos} />
+      {choosing && !state.gameOver && (
+        <ItemChoice
+          level={state.level}
+          choices={state.currentChoices}
+          remaining={state.pendingChoices - 1}
+          inventory={state.inventory}
+          onChoose={chooseItem}
+        />
       )}
 
       {state.gameOver && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
           <div className="bg-zinc-800 rounded-xl p-8 text-center">
-            <h1 className="text-4xl font-bold text-white mb-4">
-              {state.won ? "VICTORY!" : "DEFEATED"}
-            </h1>
-            <p className="text-zinc-400 mb-2">
-              {state.won
-                ? `All enemies defeated in ${levelConfig.name}!`
-                : `Defeated on turn ${Math.min(state.turn, levelConfig.maxTurns)} of ${levelConfig.maxTurns}`}
+            <h1 className="text-4xl font-bold text-white mb-4">BOARD OVERWHELMED</h1>
+            <p className="text-zinc-400 mb-1">
+              You survived <span className="text-white font-bold">{state.turn}</span> turns
+              at <span className="text-amber-400 font-bold">level {state.level}</span>.
             </p>
-            {state.killPoints > 0 && (
-              <p className="text-amber-400 font-bold mb-4">
-                +{state.killPoints} skill points earned
-              </p>
-            )}
+            <p className="text-zinc-500 text-sm mb-4">Score: {state.killPoints}</p>
             <div className="flex gap-3 justify-center mt-4">
-              {state.won ? (
-                <button
-                  onClick={() => onWin(state.killPoints)}
-                  className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors"
-                >
-                  Continue
-                </button>
-              ) : (
-                <>
-                  <button
-                    onClick={restart}
-                    className="px-6 py-3 bg-zinc-600 hover:bg-zinc-500 text-white font-medium rounded-lg transition-colors"
-                  >
-                    Retry
-                  </button>
-                  <button
-                    onClick={() => onLose(state.killPoints)}
-                    className="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 font-medium rounded-lg transition-colors"
-                  >
-                    World Map
-                  </button>
-                </>
-              )}
+              <button
+                onClick={onRetry}
+                className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors cursor-pointer"
+              >
+                Retry
+              </button>
+              <button
+                onClick={onExit}
+                className="px-6 py-3 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 font-medium rounded-lg transition-colors cursor-pointer"
+              >
+                Menu
+              </button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function DirectionPad({ onMove, disabled }: { onMove: (d: Direction) => void; disabled: boolean }) {
+  const btn = "w-14 h-14 rounded-lg flex items-center justify-center text-xl transition-all duration-150 border-2";
+  const enabled = "bg-zinc-700 hover:bg-zinc-600 active:bg-zinc-500 text-white cursor-pointer border-zinc-500";
+  const off = "bg-zinc-800 text-zinc-600 cursor-not-allowed border-zinc-700";
+  const cls = disabled ? `${btn} ${off}` : `${btn} ${enabled}`;
+
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <button className={cls} disabled={disabled} onClick={() => onMove("up")} aria-label="Move up">
+        <FaArrowUp />
+      </button>
+      <div className="flex gap-1.5">
+        <button className={cls} disabled={disabled} onClick={() => onMove("left")} aria-label="Move left">
+          <FaArrowLeft />
+        </button>
+        <button className={cls} disabled={disabled} onClick={() => onMove("down")} aria-label="Move down">
+          <FaArrowDown />
+        </button>
+        <button className={cls} disabled={disabled} onClick={() => onMove("right")} aria-label="Move right">
+          <FaArrowRight />
+        </button>
+      </div>
+      <span className="text-zinc-600 text-[10px] mt-1">Arrow keys / WASD to slam</span>
     </div>
   );
 }
