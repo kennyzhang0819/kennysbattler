@@ -8,8 +8,8 @@ const comfortaa = Comfortaa({
 });
 
 export const metadata: Metadata = {
-  title: "Kenny's Battler",
-  description: "A turn-based leveling game",
+  title: "Animal Gossip",
+  description: "Whisper a word. Every animal garbles it.",
 };
 
 export default function RootLayout({

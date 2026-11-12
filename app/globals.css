@@ -24,6 +24,32 @@ body {
   font-family: var(--font-comfortaa), sans-serif;
 }
 
+/* Behave like a game, not a web page: no scrollbars, selection, drag ghosts,
+   rubber-banding, pinch zoom or touch panning. */
+html,
+body {
+  overflow: hidden;
+  height: 100%;
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+* {
+  -webkit-user-drag: none;
+}
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 /* Game animations */
 @keyframes attack {
   0%, 100% { transform: scale(1); }

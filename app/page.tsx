@@ -1,5 +1,5 @@
-import { App } from "@/components/App";
+import { GossipApp } from "@/components/gossip/GossipApp";
 
 export default function Home() {
-  return <App />;
+  return <GossipApp />;
 }
